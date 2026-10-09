@@ -1,0 +1,46 @@
+# Swift Package Manager and Xcode build state
+.build/
+.swiftpm/
+/build/
+/DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Built applications, distribution archives, and test results
+/dist/
+*.app/
+*.dSYM/
+*.xcarchive/
+*.xcresult/
+*.dmg
+*.pkg
+*.profraw
+*.profdata
+
+# Local signing identity and credentials
+/.framelet-signing-identity
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.key
+*.pem
+*.mobileprovision
+*.provisionprofile
+
+# Local recordings and exports (source assets remain trackable)
+/recordings/
+/exports/
+
+# macOS and editor noise
+.DS_Store
+._*
+.AppleDouble/
+*~
+*.swp
+*.swo
+.idea/
+.vscode/
