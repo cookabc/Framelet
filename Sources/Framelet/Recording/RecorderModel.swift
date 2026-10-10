@@ -441,7 +441,7 @@ final class RecorderModel: ObservableObject {
         do {
             try await SessionAssembler.assemble(segments: segments, to: output)
             // Remove only this session's intermediates, after the final video has been committed.
-            if let sessionDirectory { try? FileManager.default.removeItem(at: sessionDirectory) }
+            if let sessionDirectory { RecordingLibrary.removeSession(sessionDirectory, in: libraryURL) }
             segments = []
             panel?.close()
             panel = nil
@@ -463,10 +463,20 @@ final class RecorderModel: ObservableObject {
         }
     }
 
+    /// Names a new recording after the local time it was made. `Date.ISO8601FormatStyle` reports
+    /// UTC, which put a filename eight hours away from the time the interface shows for the same
+    /// recording.
     private func newRecordingURL() -> URL {
-        let stamp = Date().formatted(.iso8601).replacingOccurrences(of: ":", with: "-")
+        let stamp = Self.recordingNameFormatter.string(from: Date())
         return libraryURL.appendingPathComponent("Framelet-\(stamp)-\(UUID().uuidString.prefix(6)).mp4")
     }
+
+    private static let recordingNameFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
+        return formatter
+    }()
 
     // MARK: - Unfinished takes
 
@@ -485,9 +495,15 @@ final class RecorderModel: ObservableObject {
     /// mid-recording, or a failure the user dismissed — into ordinary recordings. Otherwise those
     /// segments stay on disk where nothing in the interface can reach them.
     func recoverUnfinishedSessions() async {
+        let sessions = RecordingLibrary.unfinishedSessions(in: libraryURL)
+        guard !sessions.isEmpty else {
+            // Nothing to recover, but an earlier take may have left the container empty.
+            RecordingLibrary.pruneEmptySessionContainer(in: libraryURL)
+            return
+        }
         var recovered = 0
         var stranded = 0
-        for session in RecordingLibrary.unfinishedSessions(in: libraryURL) {
+        for session in sessions {
             // A recording started while this is running must not have its session touched.
             guard phase == .idle, !exporting else { return }
             let segments = RecordingLibrary.usableSegments(in: session)

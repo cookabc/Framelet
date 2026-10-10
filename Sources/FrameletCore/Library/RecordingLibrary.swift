@@ -38,12 +38,20 @@ public enum RecordingLibrary {
             }
     }
 
-    /// Deletes one session folder and, once it is gone, the folder that contained it.
+    /// Deletes one session folder and, once it is gone, the container that held it.
     /// Confined to `library` so a stray path cannot delete anything else.
     public static func removeSession(_ session: URL, in library: URL) {
         let container = sessionContainer(in: library).standardizedFileURL
         guard session.standardizedFileURL.deletingLastPathComponent().path == container.path else { return }
         try? FileManager.default.removeItem(at: session)
+        pruneEmptySessionContainer(in: library)
+    }
+
+    /// Removes the container once it holds nothing, so an empty folder is not left behind in the
+    /// library. The container is created lazily, so a take that succeeds on its first attempt would
+    /// otherwise leave it there for good.
+    public static func pruneEmptySessionContainer(in library: URL) {
+        let container = sessionContainer(in: library)
         guard let remaining = try? FileManager.default.contentsOfDirectory(atPath: container.path),
             remaining.isEmpty
         else { return }

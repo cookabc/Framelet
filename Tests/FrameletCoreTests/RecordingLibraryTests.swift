@@ -96,6 +96,29 @@ final class RecordingLibraryTests: XCTestCase {
             "An emptied container should not be left behind.")
     }
 
+    func testEmptyContainerIsPrunedButOnlyOnceItIsEmpty() throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = root.appendingPathComponent("recordings", isDirectory: true)
+        let container = RecordingLibrary.sessionContainer(in: library)
+
+        let first = RecordingLibrary.newSessionURL(in: library)
+        let second = RecordingLibrary.newSessionURL(in: library)
+        for session in [first, second] {
+            try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        }
+
+        RecordingLibrary.removeSession(first, in: library)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: container.path),
+            "The container still holds another session, so it must stay.")
+
+        RecordingLibrary.removeSession(second, in: library)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: container.path),
+            "A take that succeeds on its own must not leave an empty container behind.")
+    }
+
     private func stamp(_ url: URL, at seconds: TimeInterval) throws {
         try FileManager.default.setAttributes(
             [.creationDate: Date(timeIntervalSince1970: seconds)], ofItemAtPath: url.path)
