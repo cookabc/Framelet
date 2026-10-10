@@ -33,7 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 880, height: 678)
         window.contentView = NSHostingView(rootView: MainView(model: model))
-        window.center()
+        // Reopen where the user left it; only a first run starts centred.
+        if !window.setFrameUsingName("FrameletMainWindow") { window.center() }
+        window.setFrameAutosaveName("FrameletMainWindow")
         model.mainWindow = window
         model.showWindow = { [weak self] in self?.showWindow() }
         model.onPhaseChange = { [weak self] in self?.refreshStatus() }
@@ -51,27 +53,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "关于 Framelet", action: #selector(about), keyEquivalent: "").target = self
+        appMenu.addItem(withTitle: "About Framelet", action: #selector(about), keyEquivalent: "").target =
+            self
         appMenu.addItem(.separator())
         appMenu.addItem(
-            withTitle: "隐藏 Framelet", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+            withTitle: "Hide Framelet", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(
-            withTitle: "退出 Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            withTitle: "Quit Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
         let fileItem = NSMenuItem()
-        let fileMenu = NSMenu(title: "文件")
-        fileMenu.addItem(withTitle: "新建录制", action: #selector(toggleRecording), keyEquivalent: "n").target =
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(withTitle: "New Recording", action: #selector(toggleRecording), keyEquivalent: "n")
+            .target =
             self
-        fileMenu.addItem(withTitle: "显示主窗口", action: #selector(showWindow), keyEquivalent: "0").target = self
+        fileMenu.addItem(withTitle: "Show Main Window", action: #selector(showWindow), keyEquivalent: "0")
+            .target = self
         fileItem.submenu = fileMenu
         main.addItem(fileItem)
         let editItem = NSMenuItem()
-        let editMenu = NSMenu(title: "编辑")
-        editMenu.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "复制", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
         main.addItem(editItem)
         NSApp.mainMenu = main
@@ -103,12 +108,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let result = RegisterEventHotKey(
             RecorderShortcuts.captureKey, RecorderShortcuts.modifiers, id, GetApplicationEventTarget(),
             OptionBits(kEventHotKeyExclusive), &hotKey)
-        if result != noErr { model.notice = "录制快捷键已被占用，请使用按钮。" }
+        if result != noErr { model.notice = "The record shortcut is already taken. Use the buttons instead." }
         let pauseResult = RegisterEventHotKey(
             RecorderShortcuts.pauseKey, RecorderShortcuts.modifiers,
             EventHotKeyID(signature: RecorderShortcuts.signature, id: 2), GetApplicationEventTarget(),
             OptionBits(kEventHotKeyExclusive), &pauseHotKey)
-        if pauseResult != noErr { model.notice = "暂停快捷键已被占用，请使用按钮。" }
+        if pauseResult != noErr {
+            model.notice = "The pause shortcut is already taken. Use the buttons instead."
+        }
     }
 
     private func refreshStatus() {
@@ -119,36 +126,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             accessibilityDescription: "Framelet")
         statusItem?.button?.contentTintColor =
             model.phase == .paused ? .systemOrange : recording ? .systemRed : nil
-        statusItem?.button?.toolTip = "Framelet · \(RecorderShortcuts.captureLabel) 开始／停止"
+        statusItem?.button?.toolTip = "Framelet · \(RecorderShortcuts.captureLabel) start / stop"
     }
 
     func menuWillOpen(_ menu: NSMenu) {
         menu.removeAllItems()
         let title: String
         switch model.phase {
-        case .recording: title = "停止录制  \(model.formattedElapsed)"
-        case .paused: title = "停止并保存  \(model.formattedElapsed)"
-        case .pausing: title = "正在暂停…"
-        case .restarting: title = "保存后重新录制…"
-        case .countdown, .selecting: title = "取消录制"
-        case .starting: title = "正在启动…"
-        case .stopping: title = "正在保存…"
-        case .idle: title = "新建录制  \(RecorderShortcuts.captureLabel)"
+        case .recording: title = "Stop Recording  \(model.formattedElapsed)"
+        case .paused: title = "Stop and Save  \(model.formattedElapsed)"
+        case .pausing: title = "Pausing…"
+        case .restarting: title = "Saving, then restarting…"
+        case .countdown, .selecting: title = "Cancel Recording"
+        case .starting: title = "Starting…"
+        case .stopping: title = "Saving…"
+        case .idle: title = "New Recording  \(RecorderShortcuts.captureLabel)"
         }
         let item = menu.addItem(withTitle: title, action: #selector(toggleRecording), keyEquivalent: "")
         item.target = self
         if model.canControlRecording {
             menu.addItem(
-                withTitle: (model.phase == .paused ? "继续录制  " : "暂停录制  ") + RecorderShortcuts.pauseLabel,
+                withTitle: (model.phase == .paused ? "Resume Recording  " : "Pause Recording  ")
+                    + RecorderShortcuts.pauseLabel,
                 action: #selector(togglePause), keyEquivalent: ""
             ).target = self
-            menu.addItem(withTitle: "保存当前并重新录制", action: #selector(restartRecording), keyEquivalent: "")
-                .target = self
+            menu.addItem(
+                withTitle: "Save and Record Again", action: #selector(restartRecording), keyEquivalent: ""
+            )
+            .target = self
         }
-        menu.addItem(withTitle: "显示主窗口", action: #selector(showWindow), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Show Main Window", action: #selector(showWindow), keyEquivalent: "").target =
+            self
         menu.addItem(.separator())
         menu.addItem(
-            withTitle: "退出 Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            withTitle: "Quit Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     }
 
     @objc private func toggleRecording() { model.toggleCapture() }
@@ -162,8 +173,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Framelet",
             .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
-                as? String ?? "开发版",
-            .credits: NSAttributedString(string: "窗口与区域录制"),
+                as? String ?? "Development build",
+            .credits: NSAttributedString(string: "Window and area screen recording"),
         ])
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -177,7 +188,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if model.phase == .selecting || model.isCountingDown { model.cancelSelection() }
         guard !model.busy else {
             showWindow()
-            model.errorMessage = "录制或导出尚未结束。请先停止录制，或等待 / 取消导出，然后退出。"
+            model.errorMessage =
+                "A recording or an export is still running. Stop the recording or cancel the export, then quit."
             return .terminateCancel
         }
         return .terminateNow

@@ -4,6 +4,14 @@ import Combine
 import FrameletCore
 import UniformTypeIdentifiers
 
+/// Recording options the user should not have to set again on every launch.
+private enum SettingsKey {
+    static let fps = "recordingFPS"
+    static let showsCursor = "showsCursor"
+    static let gifFPS = "gifFPS"
+    static let gifWidth = "gifWidth"
+}
+
 @MainActor
 final class RecorderModel: ObservableObject {
     @Published var phase: RecordingPhase = .idle
@@ -22,11 +30,21 @@ final class RecorderModel: ObservableObject {
     @Published private var choosingDestination = false
     @Published var exportProgress = 0.0
     @Published var lastExport: URL?
-    @Published var fps = 30
-    @Published var showsCursor = true
-    @Published var recordingTitle = "区域录制"
-    @Published var gifFPS = 15
-    @Published var gifWidth = 960
+    // These outlive a single take, so they are remembered across launches.
+    @Published var fps = 30 {
+        didSet { defaults.set(fps, forKey: SettingsKey.fps) }
+    }
+    @Published var showsCursor = true {
+        didSet { defaults.set(showsCursor, forKey: SettingsKey.showsCursor) }
+    }
+    @Published var gifFPS = 15 {
+        didSet { defaults.set(gifFPS, forKey: SettingsKey.gifFPS) }
+    }
+    @Published var gifWidth = 960 {
+        didSet { defaults.set(gifWidth, forKey: SettingsKey.gifWidth) }
+    }
+    /// Per-clip: reset from the selected recording, so it is deliberately not remembered.
+    @Published var recordingTitle = "Region"
     @Published var gifStart = 0.0
     @Published var gifDuration = 10.0
     weak var mainWindow: NSWindow?
@@ -43,6 +61,7 @@ final class RecorderModel: ObservableObject {
     private var playbackState: AnyCancellable?
     private var playbackEnd: AnyCancellable?
     private let libraryOverride: URL?
+    private let defaults: UserDefaults
     private let trashFile: (URL) throws -> Void
     private var timer: Timer?
     private var clock = RecordingClock()
@@ -73,12 +92,24 @@ final class RecorderModel: ObservableObject {
 
     init(
         libraryURL: URL? = nil,
+        defaults: UserDefaults = .standard,
         trash: @escaping (URL) throws -> Void = {
             try FileManager.default.trashItem(at: $0, resultingItemURL: nil)
         }
     ) {
         libraryOverride = libraryURL
+        self.defaults = defaults
         trashFile = trash
+        defaults.register(defaults: [
+            SettingsKey.fps: 30,
+            SettingsKey.showsCursor: true,
+            SettingsKey.gifFPS: 15,
+            SettingsKey.gifWidth: 960,
+        ])
+        fps = defaults.integer(forKey: SettingsKey.fps)
+        showsCursor = defaults.bool(forKey: SettingsKey.showsCursor)
+        gifFPS = defaults.integer(forKey: SettingsKey.gifFPS)
+        gifWidth = defaults.integer(forKey: SettingsKey.gifWidth)
         reloadClips()
     }
 
@@ -100,7 +131,7 @@ final class RecorderModel: ObservableObject {
             {
                 select(target)
             }
-        } catch { errorMessage = "无法读取录制目录：\(error.localizedDescription)" }
+        } catch { errorMessage = "Could not read the recordings folder: \(error.localizedDescription)" }
     }
 
     func select(_ clip: RecordedClip) {
@@ -122,7 +153,8 @@ final class RecorderModel: ObservableObject {
                 let tracks = try await asset.loadTracks(withMediaType: .video)
                 guard let track = tracks.first, seconds.isFinite, seconds > 0 else {
                     throw NSError(
-                        domain: "Framelet", code: 2, userInfo: [NSLocalizedDescriptionKey: "录制文件没有可播放的画面。"])
+                        domain: "Framelet", code: 2,
+                        userInfo: [NSLocalizedDescriptionKey: "This recording has no playable video."])
                 }
                 let size = try await track.load(.naturalSize)
                 try Task.checkCancellation()
@@ -130,7 +162,9 @@ final class RecorderModel: ObservableObject {
                 duration = seconds
                 gifDuration = min(10, seconds)
                 resolution = "\(Int(size.width)) × \(Int(size.height))"
-            } catch is CancellationError {} catch { errorMessage = "无法预览录制：\(error.localizedDescription)" }
+            } catch is CancellationError {} catch {
+                errorMessage = "Could not preview the recording: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -192,8 +226,8 @@ final class RecorderModel: ObservableObject {
             }
             reloadClips()
             lastExport = nil
-            notice = "已移到废纸篓"
-        } catch { errorMessage = "删除失败：\(error.localizedDescription)" }
+            notice = "Moved to Trash"
+        } catch { errorMessage = "Delete failed: \(error.localizedDescription)" }
     }
 
     // MARK: - Recording lifecycle
@@ -216,7 +250,9 @@ final class RecorderModel: ObservableObject {
         guard !busy else {
             // The button and the hot key are both disabled during an export, which would
             // otherwise look like a broken shortcut rather than a deliberate refusal.
-            if exporting || choosingDestination { notice = "导出进行中，完成后才能开始新的录制。" }
+            if exporting || choosingDestination {
+                notice = "An export is running. You can start a new recording once it finishes."
+            }
             return
         }
         errorMessage = nil
@@ -243,7 +279,7 @@ final class RecorderModel: ObservableObject {
                 }
             } catch {
                 guard self.selector === selector, phase == .selecting else { return }
-                reportCaptureFailure(error, action: "读取应用窗口")
+                reportCaptureFailure(error, action: "Reading app windows")
                 selector.cancel()
             }
         }
@@ -342,6 +378,9 @@ final class RecorderModel: ObservableObject {
     private func finishTake(intent: FinishIntent) {
         guard canControlRecording else { return }
         let wasPaused = phase == .paused
+        // Pausing an already-paused take has nothing to stop and would strand the phase at
+        // .pausing. `togglePause` never asks for it; this keeps the function total anyway.
+        guard !(wasPaused && intent == .pause) else { return }
         finishIntent = intent
         // The clock is frozen by `segmentFinished`, not here: the encoder keeps writing until the
         // stream actually stops, so stopping the count now would make the reading shorter than the
@@ -386,11 +425,12 @@ final class RecorderModel: ObservableObject {
                 setPhase(.idle)
                 kept = !discardSessionIfUnusable()
             }
-            reportCaptureFailure(error, action: "录制")
+            reportCaptureFailure(error, action: "Recording")
             // Only promise the segments were kept when a folder with something in it survived.
             if kept {
                 errorMessage =
-                    (errorMessage ?? "录制中断。") + "\n已写入的片段保留在录制文件夹中的「未完成录制」。"
+                    (errorMessage ?? "Recording was interrupted.")
+                    + "\nThe segments written so far are in the Unfinished folder inside the recordings folder."
             }
             showWindow?()
         }
@@ -408,16 +448,17 @@ final class RecorderModel: ObservableObject {
             setPhase(.idle)
             reloadClips(select: output)
             if restart, let region {
-                notice = "上一段已保存"
+                notice = "Previous take saved"
                 mainWindow?.orderOut(nil)
                 beginCountdown(region)
             } else {
-                notice = "录制已保存"
+                notice = "Recording saved"
                 showWindow?()
             }
         } catch {
             setPhase(.paused)
-            errorMessage = "合并录制失败：\(error.localizedDescription)\n片段已保留，可点击停止重试。"
+            errorMessage =
+                "Could not join the recording: \(error.localizedDescription)\nThe segments were kept; press Stop to try again."
             showWindow?()
         }
     }
@@ -444,9 +485,11 @@ final class RecorderModel: ObservableObject {
     /// mid-recording, or a failure the user dismissed — into ordinary recordings. Otherwise those
     /// segments stay on disk where nothing in the interface can reach them.
     func recoverUnfinishedSessions() async {
-        guard phase == .idle, !exporting else { return }
         var recovered = 0
+        var stranded = 0
         for session in RecordingLibrary.unfinishedSessions(in: libraryURL) {
+            // A recording started while this is running must not have its session touched.
+            guard phase == .idle, !exporting else { return }
             let segments = RecordingLibrary.usableSegments(in: session)
             guard !segments.isEmpty else {
                 RecordingLibrary.removeSession(session, in: libraryURL)
@@ -457,16 +500,31 @@ final class RecorderModel: ObservableObject {
                 RecordingLibrary.removeSession(session, in: libraryURL)
                 recovered += 1
             } catch {
-                // Assembly never consumes its sources, so a transient failure is simply retried on
-                // the next launch. Only a session with nothing decodable is safe to discard.
+                // Assembly never consumes its sources, so nothing is lost by leaving a session in
+                // place. Only a session with nothing decodable is safe to discard outright.
                 if let failure = error as? SessionAssemblyError, case .noVideo = failure {
                     RecordingLibrary.removeSession(session, in: libraryURL)
+                } else {
+                    stranded += 1
                 }
             }
         }
-        guard recovered > 0 else { return }
-        reloadClips()
-        notice = "已恢复 \(recovered) 段未完成的录制"
+        guard recovered > 0 || stranded > 0 else { return }
+        if recovered > 0 { reloadClips() }
+        // A session that cannot be joined is retried on every launch, so say so once rather than
+        // failing silently forever.
+        switch (recovered, stranded) {
+        case (let joined, 0):
+            notice =
+                joined == 1 ? "Recovered 1 unfinished recording" : "Recovered \(joined) unfinished recordings"
+        case (0, let stuck):
+            notice =
+                "\(stuck) unfinished recording\(stuck == 1 ? "" : "s") could not be joined."
+                + " The segments remain in the Unfinished folder."
+        case (let joined, let stuck):
+            notice =
+                "Recovered \(joined); \(stuck) could not be joined and remain in the Unfinished folder."
+        }
     }
 
     // MARK: - Export
@@ -477,9 +535,9 @@ final class RecorderModel: ObservableObject {
         let savePanel = NSSavePanel()
         savePanel.allowedContentTypes = [gif ? .gif : .mpeg4Movie]
         savePanel.nameFieldStringValue = clip.exportName + (gif ? ".gif" : ".mp4")
-        savePanel.title = gif ? "导出动图" : "保存视频"
-        savePanel.prompt = "保存"
-        savePanel.nameFieldLabel = "文件名："
+        savePanel.title = gif ? "Export GIF" : "Save Video"
+        savePanel.prompt = "Save"
+        savePanel.nameFieldLabel = "File name:"
         savePanel.canCreateDirectories = true
         guard let window = mainWindow else { return }
         let settings = GIFSettings(start: gifStart, duration: gifDuration, fps: gifFPS, maxWidth: gifWidth)
@@ -510,9 +568,9 @@ final class RecorderModel: ObservableObject {
                         }
                     }
                     lastExport = destination
-                    notice = "导出完成"
-                } catch is CancellationError { notice = "已取消导出" } catch {
-                    errorMessage = "导出失败：\(error.localizedDescription)"
+                    notice = "Export complete"
+                } catch is CancellationError { notice = "Export cancelled" } catch {
+                    errorMessage = "Export failed: \(error.localizedDescription)"
                 }
                 exporting = false
                 exportTask = nil
@@ -527,11 +585,12 @@ final class RecorderModel: ObservableObject {
     private func reportCaptureFailure(_ error: Error, action: String) {
         needsScreenCapturePermission = CaptureFailure.isPermissionDenied(error)
         if needsScreenCapturePermission {
-            errorMessage = "系统拒绝了屏幕录制请求。请在「系统设置 → 隐私与安全性 → 屏幕与系统音频录制」中检查本应用的授权。若已允许，请退出后从「应用程序」重新打开。"
+            errorMessage =
+                "The system denied the screen recording request. Check this app under System Settings → Privacy & Security → Screen & System Audio Recording. If it is already allowed, quit the app and open it again from Applications."
         } else {
             let detail = error as NSError
             errorMessage =
-                "\(action)失败：\(error.localizedDescription)\n错误：\(detail.domain) (\(detail.code))。这不一定是授权问题，请重试。"
+                "\(action) failed: \(error.localizedDescription)\nError: \(detail.domain) (\(detail.code)). This is not necessarily a permissions problem; try again."
         }
     }
 

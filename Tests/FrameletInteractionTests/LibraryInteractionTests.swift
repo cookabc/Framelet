@@ -52,6 +52,32 @@ final class LibraryInteractionTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
     }
 
+    func testRecordingSettingsSurviveRelaunchAndFallBackToDefaults() async throws {
+        let suite = "FrameletSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let first = RecorderModel(libraryURL: root, defaults: defaults)
+        XCTAssertEqual(first.fps, 30, "An untouched suite should start from the built-in defaults.")
+        XCTAssertTrue(first.showsCursor)
+        XCTAssertEqual(first.gifFPS, 15)
+        XCTAssertEqual(first.gifWidth, 960)
+
+        first.fps = 60
+        first.showsCursor = false
+        first.gifFPS = 20
+        first.gifWidth = 1280
+
+        let relaunched = RecorderModel(libraryURL: root, defaults: defaults)
+        XCTAssertEqual(relaunched.fps, 60)
+        XCTAssertFalse(relaunched.showsCursor)
+        XCTAssertEqual(relaunched.gifFPS, 20)
+        XCTAssertEqual(relaunched.gifWidth, 1280)
+    }
+
     func testShortcutsAvoidRectangleOptionControlR() async {
         XCTAssertEqual(RecorderShortcuts.captureKey, UInt32(kVK_ANSI_R))
         XCTAssertEqual(RecorderShortcuts.modifiers & UInt32(optionKey), 0)
