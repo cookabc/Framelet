@@ -7,9 +7,13 @@ public enum ExportError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidRange: return "导出范围无效。请选择视频内 0.1 至 60 秒的片段。"
-        case .createFailed: return "无法创建动图，请检查保存位置和可用空间。"
-        case .finalizeFailed: return "动图写入失败。原始录制已保留，可以重新导出。"
+        case .invalidRange:
+            return "That export range is not valid. Choose 0.1 to 60 seconds inside the video."
+        case .createFailed:
+            return "The animated image could not be created. Check the destination and the free space."
+        case .finalizeFailed:
+            return
+                "The animated image could not be written. The original recording was kept, so you can export again."
         }
     }
 }

@@ -8,7 +8,7 @@ struct CaptureRegion {
     let rect: CGRect
     var windowID: CGWindowID? = nil
     var ownerPID: pid_t? = nil
-    var title: String = "区域录制"
+    var title: String = "Region"
     var displayID: CGDirectDisplayID {
         (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
     }
@@ -35,7 +35,10 @@ final class CaptureEngine: NSObject, SCStreamDelegate, SCRecordingOutputDelegate
             else {
                 throw NSError(
                     domain: "Framelet", code: 3,
-                    userInfo: [NSLocalizedDescriptionKey: "所选窗口已关闭。请停止并保存已有录制，或重新选择窗口。"])
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "The selected window closed. Stop to save what was recorded, or choose another window."
+                    ])
             }
             filter = SCContentFilter(desktopIndependentWindow: window)
             config.ignoreShadowsSingleWindow = true
@@ -52,7 +55,10 @@ final class CaptureEngine: NSObject, SCStreamDelegate, SCRecordingOutputDelegate
             else {
                 throw NSError(
                     domain: "Framelet", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "所选显示器已断开或布局已改变。请重新框选。"])
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "That display is gone or its layout changed. Select the area again."
+                    ])
             }
             let ownApps = content.applications.filter {
                 $0.processID == ProcessInfo.processInfo.processIdentifier

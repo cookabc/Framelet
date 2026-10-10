@@ -17,7 +17,7 @@ final class RecordingPanel {
         window.backgroundColor = .clear
         window.hasShadow = true
         window.isMovableByWindowBackground = true
-        window.title = "录制控制"
+        window.title = "Recording Controls"
         window.collectionBehavior = [
             .canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary, .fullScreenDisallowsTiling,
         ]
@@ -82,27 +82,31 @@ private struct RecordingHUD: View {
                 } label: {
                     Image(systemName: model.phase == .paused ? "play.fill" : "pause.fill")
                 }.buttonStyle(RecorderButtonStyle(tone: .dark))
-                    .help((model.phase == .paused ? "继续录制 " : "暂停录制 ") + RecorderShortcuts.pauseLabel)
-                    .accessibilityLabel(model.phase == .paused ? "继续录制" : "暂停录制")
+                    .help(
+                        (model.phase == .paused ? "Resume recording " : "Pause recording ")
+                            + RecorderShortcuts.pauseLabel
+                    )
+                    .accessibilityLabel(model.phase == .paused ? "Resume recording" : "Pause recording")
                 Button {
                     model.restartRecording()
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
                 }
-                .buttonStyle(RecorderButtonStyle(tone: .dark)).help("保存当前录制后重新开始").accessibilityLabel("重新录制")
+                .buttonStyle(RecorderButtonStyle(tone: .dark)).help("Save this take, then start a new one")
+                .accessibilityLabel("Record again")
                 Button {
                     model.stopRecording()
                 } label: {
                     Image(systemName: "stop.fill").font(.system(size: 14))
                 }.buttonStyle(RecorderButtonStyle(tone: .dark))
-                    .accessibilityLabel("停止录制")
+                    .accessibilityLabel("Stop recording")
             } else if model.isCountingDown {
                 Button {
                     model.cancelSelection()
                 } label: {
                     Image(systemName: "xmark")
                 }
-                .buttonStyle(RecorderButtonStyle(tone: .dark)).accessibilityLabel("取消录制")
+                .buttonStyle(RecorderButtonStyle(tone: .dark)).accessibilityLabel("Cancel recording")
             } else {
                 ProgressView().controlSize(.small).colorScheme(.dark)
             }
@@ -113,12 +117,12 @@ private struct RecordingHUD: View {
     }
     private var title: String {
         switch model.phase {
-        case .countdown(let value): return "\(value) 秒后开始录制"
-        case .starting: return "正在启动…"
-        case .pausing: return "正在暂停…"
-        case .paused: return "已暂停  \(model.formattedElapsed)"
-        case .stopping: return "正在保存…"
-        case .restarting: return "保存后重新录制…"
+        case .countdown(let value): return "Recording in \(value)"
+        case .starting: return "Starting…"
+        case .pausing: return "Pausing…"
+        case .paused: return "Paused  \(model.formattedElapsed)"
+        case .stopping: return "Saving…"
+        case .restarting: return "Saving, then restarting…"
         default: return model.formattedElapsed
         }
     }

@@ -4,9 +4,12 @@ public enum SessionAssemblyError: LocalizedError {
     case noVideo, incompatibleSegments, exportUnavailable
     public var errorDescription: String? {
         switch self {
-        case .noVideo: return "没有可用的视频片段。"
-        case .incompatibleSegments: return "录制片段的画面尺寸不同，无法合并。原始片段已保留。"
-        case .exportUnavailable: return "无法合并录制。原始片段已保留，可以重新尝试。"
+        case .noVideo: return "There are no usable video segments."
+        case .incompatibleSegments:
+            return
+                "The segments have different dimensions and cannot be joined. The original segments were kept."
+        case .exportUnavailable:
+            return "The recording could not be joined. The original segments were kept; you can try again."
         }
     }
 }

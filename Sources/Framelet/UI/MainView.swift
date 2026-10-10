@@ -14,13 +14,14 @@ struct MainView: View {
             Rectangle().fill(ink.opacity(0.08)).frame(width: 1)
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text(model.selected == nil ? "开始录制" : "录制预览").font(.system(size: 21, weight: .semibold))
+                    Text(model.selected == nil ? "Start Recording" : "Recording Preview").font(
+                        .system(size: 21, weight: .semibold))
                     Spacer()
                     if let clip = model.selected {
                         Button {
                             pendingDeletion = clip
                         } label: {
-                            Label("删除", systemImage: "trash")
+                            Label("Delete", systemImage: "trash")
                         }
                         .buttonStyle(RecorderButtonStyle(tone: .destructive)).disabled(model.busy)
                     }
@@ -33,7 +34,7 @@ struct MainView: View {
                     Text(model.notice ?? "").lineLimit(1).font(.system(size: 12)).foregroundStyle(.secondary)
                     Spacer()
                     if model.lastExport != nil {
-                        Button("显示文件") { model.revealExport() }.buttonStyle(RecorderButtonStyle())
+                        Button("Show File") { model.revealExport() }.buttonStyle(RecorderButtonStyle())
                     }
                 }.frame(height: 32)
             }.padding(22).background(paper)
@@ -43,43 +44,46 @@ struct MainView: View {
         .preferredColorScheme(.light)
         .environment(\.locale, Locale(identifier: "zh_CN"))
         .alert(
-            "操作未完成",
+            "Action Incomplete",
             isPresented: Binding(
                 get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
         ) {
-            if model.needsScreenCapturePermission { Button("打开系统设置") { model.openPermissions() } }
-            Button("知道了", role: .cancel) { model.errorMessage = nil }
+            if model.needsScreenCapturePermission {
+                Button("Open System Settings") { model.openPermissions() }
+            }
+            Button("OK", role: .cancel) { model.errorMessage = nil }
         } message: {
             Text(model.errorMessage ?? "")
         }
         .alert(
-            "删除这段录制？",
+            "Delete this recording?",
             isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } })
         ) {
-            Button("取消", role: .cancel) { pendingDeletion = nil }
-            Button("移到废纸篓", role: .destructive) {
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+            Button("Move to Trash", role: .destructive) {
                 if let clip = pendingDeletion { model.deleteClip(clip) }
                 pendingDeletion = nil
             }
         } message: {
-            Text("已导出的文件不会删除。")
+            Text("Files you already exported are not deleted.")
         }
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("我的录制", systemImage: "viewfinder")
+            Label("My Recordings", systemImage: "viewfinder")
                 .font(.system(size: 20, weight: .semibold)).padding(.top, 6)
             Button {
                 model.beginSelection()
             } label: {
-                Label("新建录制", systemImage: "plus").frame(maxWidth: .infinity)
+                Label("New Recording", systemImage: "plus").frame(maxWidth: .infinity)
             }.buttonStyle(RecorderButtonStyle(tone: .primary)).disabled(model.busy)
                 .keyboardShortcut("n", modifiers: .command)
             ScrollView {
                 LazyVStack(spacing: 4) {
                     if model.clips.isEmpty {
-                        Text("暂无录制").font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 12)
+                        Text("No recordings yet").font(.system(size: 12)).foregroundStyle(.secondary).padding(
+                            .top, 12)
                     }
                     ForEach(model.clips) { clip in
                         Button {
@@ -96,7 +100,7 @@ struct MainView: View {
                         }.buttonStyle(RecorderButtonStyle(tone: .row(model.selected == clip), height: 56))
                             .disabled(model.busy)
                             .contextMenu {
-                                Button("删除录制", role: .destructive) { pendingDeletion = clip }
+                                Button("Delete Recording", role: .destructive) { pendingDeletion = clip }
                                     .disabled(model.busy)
                             }
                     }
@@ -105,11 +109,11 @@ struct MainView: View {
             Button {
                 model.revealLibrary()
             } label: {
-                Label("录制文件夹", systemImage: "folder").frame(maxWidth: .infinity)
+                Label("Recordings Folder", systemImage: "folder").frame(maxWidth: .infinity)
             }.buttonStyle(RecorderButtonStyle())
             VStack(alignment: .leading, spacing: 7) {
-                shortcut("开始／停止", RecorderShortcuts.captureLabel)
-                shortcut("暂停／继续", RecorderShortcuts.pauseLabel)
+                shortcut("Start / stop", RecorderShortcuts.captureLabel)
+                shortcut("Pause / resume", RecorderShortcuts.pauseLabel)
             }.font(.system(size: 10)).foregroundStyle(.secondary)
         }.padding(16).frame(width: 190).background(.white)
     }
@@ -126,11 +130,11 @@ struct MainView: View {
         VStack(spacing: 16) {
             Image(systemName: "viewfinder").font(.system(size: 56, weight: .ultraLight)).foregroundStyle(
                 accent)
-            Text("点击选窗口，拖拽选区域").font(.system(size: 15))
+            Text("Click a window, or drag an area").font(.system(size: 15))
             Button {
                 model.beginSelection()
             } label: {
-                Text("选择录制范围").frame(width: 180)
+                Text("Choose Recording Area").frame(width: 180)
             }.buttonStyle(RecorderButtonStyle(tone: .primary)).disabled(model.busy)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
@@ -145,15 +149,17 @@ struct MainView: View {
                     model.togglePlayback()
                 } label: {
                     Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                }.buttonStyle(RecorderButtonStyle()).accessibilityLabel(model.isPlaying ? "暂停预览" : "播放预览")
-                    .disabled(model.busy || model.duration <= 0)
+                }.buttonStyle(RecorderButtonStyle()).accessibilityLabel(
+                    model.isPlaying ? "Pause preview" : "Play preview"
+                )
+                .disabled(model.busy || model.duration <= 0)
                 Text(clock(model.playbackTime)).monospacedDigit().frame(width: 42)
                 Slider(
                     value: Binding(
                         get: { min(model.playbackTime, max(model.duration, 0.1)) },
                         set: { model.seekPlayback(to: $0) }),
                     in: 0...max(model.duration, 0.1)
-                ).accessibilityLabel("播放进度").disabled(model.busy || model.duration <= 0)
+                ).accessibilityLabel("Playback position").disabled(model.busy || model.duration <= 0)
                 Text(clock(model.duration)).monospacedDigit().frame(width: 42)
                 Text(model.resolution).foregroundStyle(.secondary).lineLimit(1)
             }.font(.system(size: 11)).padding(8).background(.white)
@@ -162,16 +168,16 @@ struct MainView: View {
 
     private var captureSettings: some View {
         HStack(spacing: 16) {
-            Toggle("显示鼠标", isOn: $model.showsCursor).toggleStyle(.checkbox)
+            Toggle("Show cursor", isOn: $model.showsCursor).toggleStyle(.checkbox)
                 .padding(.vertical, 8).contentShape(Rectangle())
             Spacer()
             Menu {
-                Picker("帧率", selection: $model.fps) {
-                    Text("每秒 30 帧").tag(30)
-                    Text("每秒 60 帧").tag(60)
+                Picker("Frame rate", selection: $model.fps) {
+                    Text("30 fps").tag(30)
+                    Text("60 fps").tag(60)
                 }.pickerStyle(.inline)
             } label: {
-                Text("录制：每秒 \(model.fps) 帧")
+                Text("Recording: \(model.fps) fps")
             }
             .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
         }.font(.system(size: 12)).frame(height: 40).disabled(model.busy)
@@ -180,25 +186,25 @@ struct MainView: View {
     private var exportControls: some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
-                Text("动图设置").fontWeight(.medium)
+                Text("Animated Image").fontWeight(.medium)
                 Spacer()
-                Picker("长边", selection: $model.gifWidth) {
-                    Text("640 像素").tag(640)
-                    Text("960 像素").tag(960)
-                    Text("1280 像素").tag(1280)
+                Picker("Long edge", selection: $model.gifWidth) {
+                    Text("640 px").tag(640)
+                    Text("960 px").tag(960)
+                    Text("1280 px").tag(1280)
                 }.frame(width: 175)
-                Picker("帧率", selection: $model.gifFPS) {
-                    Text("每秒 10 帧").tag(10)
-                    Text("每秒 15 帧").tag(15)
-                    Text("每秒 20 帧").tag(20)
+                Picker("Frame rate", selection: $model.gifFPS) {
+                    Text("10 fps").tag(10)
+                    Text("15 fps").tag(15)
+                    Text("20 fps").tag(20)
                 }.frame(width: 165)
             }.disabled(model.busy).controlSize(.large)
             HStack(spacing: 14) {
-                rangeField("起点", value: $model.gifStart, range: 0...max(0, model.duration - 0.1))
+                rangeField("Start", value: $model.gifStart, range: 0...max(0, model.duration - 0.1))
                 rangeField(
-                    "时长", value: $model.gifDuration,
+                    "Duration", value: $model.gifDuration,
                     range: 0.1...max(0.1, min(60, model.duration - model.gifStart)))
-                Text("最长 60 秒").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("Up to 60 s").font(.system(size: 10)).foregroundStyle(.secondary)
             }.disabled(model.busy || model.duration < 0.1)
                 .onChange(of: model.gifStart) { _, value in
                     model.gifStart = max(0, min(value, max(0, model.duration - 0.1)))
@@ -208,19 +214,20 @@ struct MainView: View {
                 HStack {
                     ProgressView(value: model.exportProgress)
                     Text("\(Int(model.exportProgress * 100))%").monospacedDigit()
-                    Button("取消") { model.cancelExport() }.buttonStyle(RecorderButtonStyle())
+                    Button("Cancel") { model.cancelExport() }.buttonStyle(RecorderButtonStyle())
                 }.frame(height: 44)
             } else {
                 HStack(spacing: 12) {
                     Button {
                         model.export(gif: false)
                     } label: {
-                        Label("保存视频", systemImage: "film").frame(maxWidth: .infinity)
+                        Label("Save Video", systemImage: "film").frame(maxWidth: .infinity)
                     }.buttonStyle(RecorderButtonStyle())
                     Button {
                         model.export(gif: true)
                     } label: {
-                        Label("导出动图", systemImage: "photo.on.rectangle.angled").frame(maxWidth: .infinity)
+                        Label("Export GIF", systemImage: "photo.on.rectangle.angled").frame(
+                            maxWidth: .infinity)
                     }.buttonStyle(RecorderButtonStyle(tone: .primary))
                 }.disabled(model.busy || model.duration < 0.1)
             }
@@ -241,7 +248,7 @@ struct MainView: View {
                     }), format: .number.precision(.fractionLength(1))
             )
             .textFieldStyle(.roundedBorder).frame(width: 62).controlSize(.large)
-            Text("秒").foregroundStyle(.secondary)
+            Text("s").foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity)
     }
 
@@ -251,11 +258,11 @@ struct MainView: View {
             Text(model.phase.statusText).font(.system(size: 12))
             Text(model.formattedElapsed).monospacedDigit()
             Spacer(minLength: 0)
-            Button(model.phase == .paused ? "继续" : "暂停") { model.togglePause() }.buttonStyle(
+            Button(model.phase == .paused ? "Resume" : "Pause") { model.togglePause() }.buttonStyle(
                 RecorderButtonStyle())
-            Button("重录") { model.restartRecording() }.buttonStyle(RecorderButtonStyle())
-                .help("保存当前录制后重新开始")
-            Button("停止") { model.stopRecording() }.buttonStyle(RecorderButtonStyle(tone: .destructive))
+            Button("Record Again") { model.restartRecording() }.buttonStyle(RecorderButtonStyle())
+                .help("Save this take, then start a new one")
+            Button("Stop") { model.stopRecording() }.buttonStyle(RecorderButtonStyle(tone: .destructive))
         }.disabled(!model.canControlRecording)
     }
 

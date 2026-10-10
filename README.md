@@ -1,91 +1,132 @@
 # Framelet
 
-原生 macOS 窗口与区域录屏工具。选择窗口或拖选区域后开始录制，支持暂停、继续和重新录制，可预览并导出视频或循环动图。当前版本仅录画面，所有处理均在本机完成。
+A native macOS window and area screen recorder. Pick a window or drag out an area, then record —
+pause, resume and restart are supported, and takes can be previewed and exported as a video or a
+looping animated image. This version records picture only, and all processing happens on this Mac.
 
-## 环境要求
+## Requirements
 
-- macOS 15 或更高版本。
-- 开发和测试需要 Xcode 16 或更新版本提供的 Swift 6 工具链，无第三方依赖。
-- 构建并安装应用需要本机有效的 Apple Development 或 Developer ID 签名身份；单独编译和测试不需要签名证书。
+- macOS 15 or later.
+- The Swift 6 toolchain from Xcode 16 or later for development and tests. No third-party dependencies.
+- Building and installing the app needs a valid Apple Development or Developer ID signing identity on
+  this Mac. Compiling and testing on their own need no certificate.
 
-## 使用
+## Using it
 
-从 `/Applications/Framelet.app` 启动应用。首次录制时，按系统提示允许屏幕录制。
+Launch the app from `/Applications/Framelet.app`. The first time you record, allow screen recording
+when the system asks.
 
-| 操作 | 方式 |
+| Action | How |
 | --- | --- |
-| 开始／停止 | `⌃⇧⌘R`，或点击「新建录制」和「停止」 |
-| 暂停／继续 | `⌃⇧⌘P`，或点击浮动条中的对应按钮 |
-| 选择窗口 | 悬停高亮后单击或按回车确认 |
-| 选择区域 | 拖拽框选，松开后确认 |
-| 取消选择 | 按退出键或点击鼠标右键 |
-| 重新录制 | 点击浮动条中的重录按钮，先保存当前视频，再沿用原范围录制 |
-| 导出 | 点击「保存视频」或「导出动图」 |
-| 删除 | 点击「删除」，或右键点击历史片段；确认后移到废纸篓 |
+| Start / stop | `⌃⇧⌘R`, or the "New Recording" and "Stop" buttons |
+| Pause / resume | `⌃⇧⌘P`, or the matching buttons on the floating bar |
+| Choose a window | Hover to highlight, then click or press Return |
+| Choose an area | Drag out the area and release |
+| Cancel choosing | Press Escape or right-click |
+| Record again | The record-again button on the floating bar saves the current video first, then records again over the same region |
+| Export | "Save Video" or "Export GIF" |
+| Delete | "Delete", or right-click a recording in the list, then confirm to move it to the Trash |
 
-确认范围后倒数 3 秒开始录制。暂停期间不计入视频时长。关闭主窗口后，应用仍在菜单栏运行。快捷键采用独占注册；若已被其他应用占用，请使用窗口或菜单栏按钮。
+Recording starts after a three-second countdown. Paused time is not counted towards the video's
+length. Closing the main window leaves the app running in the menu bar. The shortcuts are registered
+exclusively; if another app already owns one, use the window or menu bar buttons instead.
 
-## 录制与文件
+## Recording and files
 
-- 区域模式可在任一显示器上框选，一次限定在一台显示器内。
-- 窗口模式跟随选中的窗口，输出尺寸固定为开始时的尺寸；窗口缩放后可能出现留边，关闭窗口后无法继续录制该窗口。
-- 默认每秒 30 帧，可选每秒 60 帧，并可选择是否显示鼠标。输出为 H.264 视频，长边最多 3840 像素。
-- 动图循环播放，可设起点、时长、帧率和长边尺寸；最长 60 秒，默认使用前 10 秒，短视频使用实际时长。
-- 视频和动图分别保存为 `.mp4` 和 `.gif`，均不含声音。
-- 原始录制保存在 `~/Library/Application Support/Framelet/Recordings/`。关闭窗口或导出文件不会删除原始录制；删除原始录制也不影响已导出的副本。
-- 暂停时保存媒体片段，停止时连续拼接。成片保存成功后才清理中间片段；失败时保留在录制目录下的「未完成录制」文件夹。
-- 下次启动时会自动把「未完成录制」里遗留的片段拼成普通录制，并存进录制列表；不含任何可用片段的空文件夹直接丢弃。拼接失败不会消耗原始片段，可以留待下次启动重试。
-- 导出先写临时文件，成功后再替换目标文件。取消或失败时保留已有目标文件；取消视频导出会立即停止复制，不必等整个文件复制完。
+- Area mode can select on any display, but one capture stays within a single display.
+- Window mode follows the window you picked and locks the output size to the size it had when the
+  capture started. Resizing the window afterwards can leave blank edges, and closing it means the
+  recording cannot continue.
+- 30 frames per second by default, 60 as an option, and the cursor can be shown or hidden. Output is
+  H.264 video, with the long edge capped at 3840 pixels.
+- Animated images loop, with a configurable start, duration, frame rate and long edge. They are capped
+  at 60 seconds and default to the first 10 seconds, or the whole clip when it is shorter.
+- Videos and animated images are saved as `.mp4` and `.gif`, both without sound.
+- Original recordings live in `~/Library/Application Support/Framelet/Recordings/`. Closing the window
+  or exporting does not delete them, and deleting an original leaves any exported copy alone.
+- Pausing writes a media segment and stopping joins the segments back together. The intermediate
+  segments are only cleaned up once the joined video has been saved; if that fails they are kept in an
+  "Unfinished" folder inside the recordings folder.
+- On the next launch, segments left in "Unfinished" are joined into ordinary recordings and added to
+  the list, and folders holding nothing usable are discarded. A failed join never consumes the
+  original segments, so it can simply be retried on the next launch; a session that cannot be joined
+  at all is reported in the status line rather than retried in silence.
+- Exports are written to a temporary file and only replace the destination on success, so cancelling or
+  failing leaves any existing file untouched. Cancelling a video export stops the copy immediately
+  instead of waiting for the whole file.
+- The recording options — frame rate, cursor visibility, and the animated image's frame rate and long
+  edge — are remembered between launches, along with the main window's size and position. The animated
+  image's start and duration are reset per recording, since they describe the selected clip.
 
-## 开发与安装
+## Development and installation
 
 ```sh
-# 编译与测试，不安装应用
+# Compile and test without installing the app
 swift build
 swift test
 
-# 正常退出运行中的应用后，构建、签名并安装
+# Quit the running app, then build, sign and install it
 bash scripts/build.sh
 open /Applications/Framelet.app
 ```
 
-`Package.swift` 可直接用 Xcode 打开。构建脚本生成图标、包装应用并安装到 `/Applications/Framelet.app`。首次选择的签名身份保存在 `.framelet-signing-identity` 中，后续构建继续使用同一身份；证书不可用时会报错，不回退为临时签名。可通过 `FRAMELET_SIGN_IDENTITY` 环境变量显式指定签名身份。
+`Package.swift` opens directly in Xcode. The build script generates the icon, wraps the executable into
+an app bundle and installs it to `/Applications/Framelet.app`. The first identity it picks is stored in
+`.framelet-signing-identity` and reused by later builds. If no usable certificate is found it fails
+rather than falling back to ad-hoc signing. An identity can also be named explicitly with the
+`FRAMELET_SIGN_IDENTITY` environment variable.
 
-本机签名配置、证书、环境文件、构建缓存和安装包均由 `.gitignore` 排除。不要提交录制内容或个人签名配置。对外分发另需 Developer ID 签名与公证，当前脚本只负责本机构建安装。
+Local signing configuration, certificates, environment files, build caches and installed bundles are
+all excluded by `.gitignore`. Do not commit recordings or personal signing configuration. Distributing
+the app to others additionally needs Developer ID signing and notarisation; this script only handles
+building and installing locally.
 
-### 代码格式
+### Code formatting
 
-仓库使用 `.editorconfig` 和 `.swift-format` 统一格式：
+The repository uses `.editorconfig` and `.swift-format` to keep formatting consistent, and CI enforces
+it:
 
 ```sh
 xcrun swift-format format --in-place --recursive Sources Tests scripts Package.swift
 xcrun swift-format lint --strict --recursive Sources Tests scripts Package.swift
 ```
 
-### 验证范围
+### What the tests cover
 
-`swift test` 覆盖坐标转换、窗口命中、权限错误分类、暂停计时、媒体拼接、动图导出、文件保护和删除边界，以及未完成录制的枚举/清理、片段顺序和分块复制的取消边界。交互测试直接运行选择视图的事件处理，检查首次点击、双击、拖拽、回车确认和面板属性。
+`swift test` covers coordinate conversion, window hit testing, permission error classification,
+pause-aware timing, media assembly, animated image export, file protection and deletion boundaries, the
+enumeration and cleanup of unfinished takes with their segment order, the chunk boundaries of
+cancellable copying, and that the recording options survive a relaunch. The interaction tests drive the
+selection view's event handling directly, covering the first click, double click, drag, Return to
+confirm, and the panel's properties.
 
-GitHub Actions 在推送和拉取请求时运行测试、发布模式编译，以及构建脚本和应用信息文件检查。CI 不安装应用、不使用签名证书，也不请求屏幕录制权限。
+GitHub Actions runs the tests, a release-mode build, the formatting lint, and checks of the build script
+and the app's information file on every push and pull request. It does not install the app, use a
+signing certificate, or ask for screen recording permission.
 
-实际屏幕捕获、全屏空间、外接显示器和窗口关闭等场景仍需授权后的本机测试，自动测试不能替代这些验证。
+Real screen capture, full-screen spaces, external displays and closing a recorded window still need
+hands-on testing on an authorised machine. The automated tests are no substitute for those.
 
-## 目录
+## Layout
 
-| 路径 | 内容 |
+| Path | Contents |
 | --- | --- |
-| `Sources/Framelet/Application/` | 应用入口、菜单栏和快捷键 |
-| `Sources/Framelet/Capture/` | 选择面板、鼠标事件和屏幕捕获 |
-| `Sources/Framelet/Recording/` | 录制状态、协调逻辑和浮动控制条 |
-| `Sources/Framelet/Library/` | 录制条目与文件命名 |
-| `Sources/Framelet/UI/` | 主界面、视频预览和按钮样式 |
-| `Sources/FrameletCore/` | 捕获几何、计时、拼接、导出和文件管理 |
-| `Tests/FrameletCoreTests/` | 核心逻辑与媒体集成测试，`Support/` 提供合成视频 |
-| `Tests/FrameletInteractionTests/` | 选择视图和录制库交互回归测试 |
-| `Resources/`、`scripts/` | 应用信息、图标生成和构建安装脚本 |
+| `Sources/Framelet/Application/` | App entry point, menu bar and shortcuts |
+| `Sources/Framelet/Capture/` | Selection panels, mouse events and screen capture |
+| `Sources/Framelet/Recording/` | Recording state, coordination and the floating control bar |
+| `Sources/Framelet/Library/` | Recording entries and file naming |
+| `Sources/Framelet/UI/` | Main window, video preview and button styles |
+| `Sources/FrameletCore/` | Capture geometry, timing, assembly, export and file management |
+| `Tests/FrameletCoreTests/` | Core logic and media integration tests; `Support/` synthesises video |
+| `Tests/FrameletInteractionTests/` | Regression tests for the selection view and the recording library |
+| `Resources/`, `scripts/` | App information, icon generation and the build/install script |
 
-## 权限排查
+## Permission troubleshooting
 
-若已经授权仍无法录制，先退出旧副本，从「应用程序」重新打开，并检查该副本的屏幕录制权限。更换签名身份或运行位置后，旧授权可能不再适用。应用使用系统捕获请求的实际结果判断权限，不自行修改或重置系统授权。
+If recording still fails after granting permission, quit any older copy, reopen the app from
+Applications, and check the permission for that copy. Permission can stop applying after the signing
+identity or the location changes. The app decides from the actual result of the system capture request
+and never edits or resets the system's permission itself.
 
-底层使用 Apple 的 [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit) 和 [Image I/O](https://developer.apple.com/documentation/imageio)。
+Under the hood it uses Apple's [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit)
+and [Image I/O](https://developer.apple.com/documentation/imageio).

@@ -2,7 +2,7 @@ import Foundation
 
 public enum RecordingLibrary {
     /// Holds the segments of a take that has not been joined into a recording yet.
-    public static let sessionFolderName = "未完成录制"
+    public static let sessionFolderName = "Unfinished"
 
     public static func sessionContainer(in library: URL) -> URL {
         library.appendingPathComponent(sessionFolderName, isDirectory: true)
@@ -59,7 +59,9 @@ public enum RecordingLibrary {
         guard resolved.deletingLastPathComponent().path == root.path,
             resolved.pathExtension.lowercased() == "mp4"
         else {
-            throw NSError(domain: "Framelet", code: 4, userInfo: [NSLocalizedDescriptionKey: "只能删除录制列表中的视频。"])
+            throw NSError(
+                domain: "Framelet", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Only recordings in the library can be deleted."])
         }
         try trash(file)
     }

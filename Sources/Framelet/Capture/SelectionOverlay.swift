@@ -6,7 +6,7 @@ final class SelectionPanel: NSPanel {
         super.init(
             contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
             defer: false)
-        title = "选择录制范围"
+        title = "Choose Recording Area"
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = false
         isFloatingPanel = true
@@ -142,12 +142,13 @@ final class SelectionView: NSView {
             outline.lineWidth = 1.5
             outline.stroke()
             let size =
-                hovered.map { String($0.title.prefix(65)) + "  ·  点击录制窗口" }
+                hovered.map { String($0.title.prefix(65)) + "  ·  Click to record this window" }
                 ?? "\(Int(selection.width)) × \(Int(selection.height))"
             drawLabel(size, at: CGPoint(x: selection.midX, y: max(20, selection.minY - 34)), fontSize: 12)
         }
         drawLabel(
-            "单击选窗口 · 拖拽选区域 · 回车确认 · ⎋ 取消", at: CGPoint(x: bounds.midX, y: bounds.height - 96), fontSize: 15)
+            "Click a window · Drag an area · Return to confirm · ⎋ to cancel",
+            at: CGPoint(x: bounds.midX, y: bounds.height - 96), fontSize: 15)
     }
 
     private func drawLabel(_ text: String, at point: CGPoint, fontSize: CGFloat) {
