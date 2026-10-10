@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 940, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "录屏"
+        window.title = "Framelet"
         window.titlebarAppearsTransparent = true
         window.backgroundColor = NSColor(red: 0.97, green: 0.97, blue: 0.94, alpha: 1)
         window.isReleasedWhenClosed = false
@@ -44,16 +44,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshStatus()
         registerHotKey()
         showWindow()
+        Task { await model.recoverUnfinishedSessions() }
     }
 
     private func buildMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "关于录屏", action: #selector(about), keyEquivalent: "").target = self
+        appMenu.addItem(withTitle: "关于 Framelet", action: #selector(about), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "隐藏录屏", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "退出录屏", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "隐藏 Framelet", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "退出 Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
         let fileItem = NSMenuItem()
@@ -116,7 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             accessibilityDescription: "Framelet")
         statusItem?.button?.contentTintColor =
             model.phase == .paused ? .systemOrange : recording ? .systemRed : nil
-        statusItem?.button?.toolTip = "录屏 · \(RecorderShortcuts.captureLabel) 开始／停止"
+        statusItem?.button?.toolTip = "Framelet · \(RecorderShortcuts.captureLabel) 开始／停止"
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -144,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(withTitle: "显示主窗口", action: #selector(showWindow), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "退出录屏", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: "退出 Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     }
 
     @objc private func toggleRecording() { model.toggleCapture() }
@@ -156,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func about() {
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "录屏",
+            .applicationName: "Framelet",
             .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
                 as? String ?? "开发版",
             .credits: NSAttributedString(string: "窗口与区域录制"),

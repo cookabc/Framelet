@@ -166,8 +166,10 @@ struct MainView: View {
                 .padding(.vertical, 8).contentShape(Rectangle())
             Spacer()
             Menu {
-                Button("每秒 30 帧") { model.fps = 30 }
-                Button("每秒 60 帧") { model.fps = 60 }
+                Picker("帧率", selection: $model.fps) {
+                    Text("每秒 30 帧").tag(30)
+                    Text("每秒 60 帧").tag(60)
+                }.pickerStyle(.inline)
             } label: {
                 Text("录制：每秒 \(model.fps) 帧")
             }
@@ -246,7 +248,7 @@ struct MainView: View {
     private var recordingControls: some View {
         HStack(spacing: 8) {
             Circle().fill(model.phase == .paused ? .orange : .red).frame(width: 8, height: 8)
-            Text(model.phase == .paused ? "已暂停" : "录制中").font(.system(size: 12))
+            Text(model.phase.statusText).font(.system(size: 12))
             Text(model.formattedElapsed).monospacedDigit()
             Spacer(minLength: 0)
             Button(model.phase == .paused ? "继续" : "暂停") { model.togglePause() }.buttonStyle(

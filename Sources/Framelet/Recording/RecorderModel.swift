@@ -213,7 +213,12 @@ final class RecorderModel: ObservableObject {
     }
 
     func beginSelection() {
-        guard !busy else { return }
+        guard !busy else {
+            // The button and the hot key are both disabled during an export, which would
+            // otherwise look like a broken shortcut rather than a deliberate refusal.
+            if exporting || choosingDestination { notice = "导出进行中，完成后才能开始新的录制。" }
+            return
+        }
         errorMessage = nil
         notice = nil
         needsScreenCapturePermission = false
@@ -250,8 +255,7 @@ final class RecorderModel: ObservableObject {
         clock.reset()
         elapsed = 0
         segments = []
-        sessionDirectory = libraryURL.appendingPathComponent("未完成录制", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        sessionDirectory = RecordingLibrary.newSessionURL(in: libraryURL)
         let panel = RecordingPanel(model: self)
         self.panel = panel
         panel.show(near: region)
@@ -296,12 +300,16 @@ final class RecorderModel: ObservableObject {
             guard let self, self.engine === engine, self.phase == .starting else { return }
             self.clock.resume(at: ProcessInfo.processInfo.systemUptime)
             self.setPhase(.recording)
-            self.timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            // Added in `.common` mode: `scheduledTimer` only runs in `.default`, so the reading
+            // would freeze while a menu is open or the user is dragging a slider.
+            let ticker = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
                     self.elapsed = self.clock.elapsed(at: ProcessInfo.processInfo.systemUptime)
                 }
             }
+            RunLoop.main.add(ticker, forMode: .common)
+            self.timer = ticker
         }
         engine.onFinished = { [weak self, weak engine] result in
             guard let self, self.engine === engine else { return }
@@ -335,7 +343,9 @@ final class RecorderModel: ObservableObject {
         guard canControlRecording else { return }
         let wasPaused = phase == .paused
         finishIntent = intent
-        freezeClock()
+        // The clock is frozen by `segmentFinished`, not here: the encoder keeps writing until the
+        // stream actually stops, so stopping the count now would make the reading shorter than the
+        // file it describes.
         setPhase(intent == .pause ? .pausing : intent == .restart ? .restarting : .stopping)
         if wasPaused {
             Task { await completeTake(restart: intent == .restart) }
@@ -372,6 +382,7 @@ final class RecorderModel: ObservableObject {
                 panel?.close()
                 panel = nil
                 setPhase(.idle)
+                discardSessionIfUnusable()
             }
             reportCaptureFailure(error, action: "录制")
             errorMessage = (errorMessage ?? "录制中断。") + "\n已写入的片段保留在录制文件夹中的「未完成录制」。"
@@ -380,9 +391,7 @@ final class RecorderModel: ObservableObject {
     }
 
     private func completeTake(restart: Bool) async {
-        let filename =
-            "Framelet-\(Date().formatted(.iso8601).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString.prefix(6)).mp4"
-        let output = libraryURL.appendingPathComponent(filename)
+        let output = newRecordingURL()
         do {
             try await SessionAssembler.assemble(segments: segments, to: output)
             // Remove only this session's intermediates, after the final video has been committed.
@@ -405,6 +414,52 @@ final class RecorderModel: ObservableObject {
             errorMessage = "合并录制失败：\(error.localizedDescription)\n片段已保留，可点击停止重试。"
             showWindow?()
         }
+    }
+
+    private func newRecordingURL() -> URL {
+        let stamp = Date().formatted(.iso8601).replacingOccurrences(of: ":", with: "-")
+        return libraryURL.appendingPathComponent("Framelet-\(stamp)-\(UUID().uuidString.prefix(6)).mp4")
+    }
+
+    // MARK: - Unfinished takes
+
+    /// Drops a session folder that ended up holding nothing decodable, so a take that failed
+    /// before the encoder wrote a frame does not leave an invisible folder behind.
+    private func discardSessionIfUnusable() {
+        guard let sessionDirectory,
+            RecordingLibrary.usableSegments(in: sessionDirectory).isEmpty
+        else { return }
+        RecordingLibrary.removeSession(sessionDirectory, in: libraryURL)
+        self.sessionDirectory = nil
+    }
+
+    /// Joins takes that were interrupted before their segments were assembled — quitting the app
+    /// mid-recording, or a failure the user dismissed — into ordinary recordings. Otherwise those
+    /// segments stay on disk where nothing in the interface can reach them.
+    func recoverUnfinishedSessions() async {
+        guard phase == .idle, !exporting else { return }
+        var recovered = 0
+        for session in RecordingLibrary.unfinishedSessions(in: libraryURL) {
+            let segments = RecordingLibrary.usableSegments(in: session)
+            guard !segments.isEmpty else {
+                RecordingLibrary.removeSession(session, in: libraryURL)
+                continue
+            }
+            do {
+                try await SessionAssembler.assemble(segments: segments, to: newRecordingURL())
+                RecordingLibrary.removeSession(session, in: libraryURL)
+                recovered += 1
+            } catch {
+                // Assembly never consumes its sources, so a transient failure is simply retried on
+                // the next launch. Only a session with nothing decodable is safe to discard.
+                if let failure = error as? SessionAssemblyError, case .noVideo = failure {
+                    RecordingLibrary.removeSession(session, in: libraryURL)
+                }
+            }
+        }
+        guard recovered > 0 else { return }
+        reloadClips()
+        notice = "已恢复 \(recovered) 段未完成的录制"
     }
 
     // MARK: - Export
