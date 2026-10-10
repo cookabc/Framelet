@@ -20,7 +20,7 @@ when the system asks.
 | --- | --- |
 | Start / stop | `⌥⌘R`, or the "New Recording" and "Stop" buttons |
 | Pause / resume | `⌥⌘P`, or the matching buttons on the floating bar |
-| Choose a window | Hover to highlight, then click or press Return |
+| Choose a window or menu panel | Hover to highlight, then click, press Return or press the recording shortcut again |
 | Choose an area | Drag out the area and release |
 | Cancel choosing | Press Escape or right-click |
 | Record again | The record-again button on the floating bar saves the current video first, then records again over the same region |
@@ -34,21 +34,33 @@ bar.
 The shortcuts are registered as exclusive global hot keys, so they can collide with another app.
 Registration reports the collision rather than assuming success, and the app then falls back to the
 next combination it can claim — `⌃⌘R` and `⌃⌘P`, then `⌃⇧⌘R` and `⌃⇧⌘P`. Whichever combination is
-actually in use is what the window, the menu bar and this file report, and the status line says so
+actually in use is shown in the window, selector and menu bar, and the status line says so
 when the preferred one was taken.
 
 ### Capturing something that closes when you click
 
-A menu bar panel, a dropdown or a context menu disappears the moment anything is clicked, so it
-cannot be captured by clicking on it — clicking to choose it is what dismisses it. Choose the area it
-appears in *first*, while it is closed, then open it during the countdown: the floating bar prompts
-you at that point. Raise the countdown to 5 or 10 seconds if three is not enough time. The area is
-remembered by "Record Again" on the floating bar, so a second take over the same area needs no
-selection at all.
+Open the panel, press the recording shortcut (`⌥⌘R` by default), then move the pointer over the panel
+to highlight it. **Press the same shortcut again to confirm without clicking.** Return also confirms
+when the selector shows that hint. Keep the panel open through the countdown and stop with the
+recording shortcut when finished.
+
+The selector never becomes the key window. Return and Escape are temporarily registered only while
+choosing and released when the selector closes; a key already owned by another app is omitted from
+the hints. Right-click always cancels. Keyboard confirmation closes the selector immediately; mouse
+confirmation still absorbs a second click to avoid sending it through to the underlying window.
+
+Menu panels are recorded as a fixed screen area, including whatever later appears in that area.
+Some apps dismiss their panels on outside clicks or shortcuts themselves. For these, drag out the
+area first and reopen the panel during the countdown, which can be raised to 5 or 10 seconds.
+"Record Again" reuses the same area. Normal windows still use window capture and dragging still
+selects an arbitrary area.
 
 ## Recording and files
 
 - Area mode can select on any display, but one capture stays within a single display.
+- Area mode captures composed display frames and crops them before encoding, so popup composition
+  does not depend on the selection's edges. Only the selected area is written to disk. Processing
+  full display frames can use more GPU memory than capturing a small source rectangle directly.
 - Window mode follows the window you picked and locks the output size to the size it had when the
   capture started. Resizing the window afterwards can leave blank edges, and closing it means the
   recording cannot continue.
@@ -122,6 +134,15 @@ signing certificate, or ask for screen recording permission.
 
 Real screen capture, full-screen spaces, external displays and closing a recorded window still need
 hands-on testing on an authorised machine. The automated tests are no substitute for those.
+
+For an opt-in live regression check, keep a popup open and run
+`FRAMELET_LIVE_PANEL_OWNER=magpie swift test --filter LivePanelCaptureTests` on a Mac with screen
+recording access. It drives a partial-area drag through the real recorder, pauses, resumes and saves
+a video to a temporary directory printed as `LIVE_PANEL_CAPTURE`. Inspect that video to check the
+popup pixels; the test only asserts lifecycle and file creation. Test-process activation can dismiss
+transient panels, so a persistent test window at popup level is also suitable. The ordinary test suite
+skips this live check and separately verifies crop orientation, Retina scaling, encoded colors, output
+dimensions and static-frame duration using synthetic frames.
 
 ## Layout
 

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import FrameletCore
 import XCTest
 
@@ -35,7 +36,9 @@ final class SelectionInteractionTests: XCTestCase {
         defer { panel.close() }
         XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
         XCTAssertFalse(panel.canBecomeMain)
-        XCTAssertTrue(panel.canBecomeKey)
+        XCTAssertFalse(panel.canBecomeKey)
+        XCTAssertTrue(panel.becomesKeyOnlyIfNeeded)
+        XCTAssertFalse(view.needsPanelToBecomeKey)
         XCTAssertFalse(panel.hidesOnDeactivate)
         XCTAssertFalse(panel.ignoresMouseEvents)
         XCTAssertFalse(panel.isMovable)
@@ -50,6 +53,54 @@ final class SelectionInteractionTests: XCTestCase {
         view.mouseDown(with: mouse(.leftMouseDown, at: CGPoint(x: 400, y: 300), panel: panel))
         view.mouseUp(with: mouse(.leftMouseUp, at: CGPoint(x: 402, y: 301), panel: panel))
         XCTAssertEqual(selected, 42)
+    }
+
+    func testShowingAndClickingOverlayKeepsExistingKeyWindow() async throws {
+        let application = NSApplication.shared
+        let previousPolicy = application.activationPolicy()
+        application.setActivationPolicy(.accessory)
+        let host = NSPanel(
+            contentRect: CGRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled, .nonactivatingPanel], backing: .buffered, defer: false)
+        host.isReleasedWhenClosed = false
+        let (panel, view) = fixture()
+        defer {
+            panel.close()
+            host.close()
+            application.setActivationPolicy(previousPolicy)
+        }
+        host.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(100))
+        guard host.isKeyWindow else {
+            throw XCTSkip("This test host cannot acquire keyboard focus in the current WindowServer session")
+        }
+        panel.orderFrontRegardless()
+        panel.makeKey()
+        view.mouseDown(with: mouse(.leftMouseDown, at: CGPoint(x: 400, y: 300), panel: panel))
+        XCTAssertFalse(panel.isKeyWindow)
+        XCTAssertTrue(host.isKeyWindow, "The selector must leave the target's keyboard focus alone")
+    }
+
+    func testSelectionKeysReleaseReturnAfterStopAndDeinit() async throws {
+        _ = NSApplication.shared
+        var keys: SelectionKeys? = SelectionKeys()
+        XCTAssertTrue(keys!.start { _ in }.contains(.confirm))
+        var competing: EventHotKeyRef?
+        func registerReturn() -> OSStatus {
+            RegisterEventHotKey(
+                UInt32(kVK_Return), 0, EventHotKeyID(signature: 0x5445_5354, id: 1),
+                GetApplicationEventTarget(), OptionBits(kEventHotKeyExclusive), &competing)
+        }
+        defer { if let competing { UnregisterEventHotKey(competing) } }
+        XCTAssertEqual(registerReturn(), OSStatus(eventHotKeyExistsErr))
+        keys?.stop()
+        XCTAssertEqual(registerReturn(), noErr)
+        XCTAssertFalse(keys!.start { _ in }.contains(.confirm), "An occupied key must not be advertised")
+        if let competing { UnregisterEventHotKey(competing) }
+        competing = nil
+        XCTAssertTrue(keys!.start { _ in }.contains(.confirm))
+        keys = nil
+        XCTAssertEqual(registerReturn(), noErr, "Leaving selection must restore Return to other apps")
     }
 
     func testDoubleClickCommitsOnceIncludingAtWindowTitleBar() async {
@@ -89,6 +140,27 @@ final class SelectionInteractionTests: XCTestCase {
             charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
         view.keyDown(with: event)
         XCTAssertEqual(selected, 42)
+    }
+
+    func testMenuConfirmationUsesClippedAreaAndNeverWindowCapture() async {
+        let (panel, view) = fixture(origin: CGPoint(x: -800, y: 600))
+        defer { panel.close() }
+        view.candidates = [
+            WindowCandidate(
+                id: 99, ownerPID: 456, frame: CGRect(x: -820, y: 1000, width: 250, height: 300),
+                title: "Test Menu", isMenu: true)
+        ]
+        var regions: [CGRect] = []
+        view.onSelect = { regions.append($0) }
+        view.onWindowSelect = { _ in XCTFail("Transient menus must use display pixels") }
+        view.updateHover(globalPoint: CGPoint(x: -700, y: 1100))
+        let event = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 1,
+            windowNumber: panel.windowNumber, context: nil, characters: "\r",
+            charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+        view.keyDown(with: event)
+        view.keyDown(with: event)
+        XCTAssertEqual(regions, [CGRect(x: 0, y: 400, width: 230, height: 200)])
     }
 
     func testHighlightedInteriorRetainsMouseHitSurface() async throws {

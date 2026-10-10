@@ -249,7 +249,8 @@ final class RecorderModel: ObservableObject {
         switch phase {
         case .idle: beginSelection()
         case .recording, .paused: stopRecording()
-        case .selecting, .countdown: cancelSelection()
+        case .selecting: selector?.confirmHovered()
+        case .countdown: cancelSelection()
         case .starting, .pausing, .stopping, .restarting: break
         }
     }
@@ -294,9 +295,7 @@ final class RecorderModel: ObservableObject {
     }
 
     private func beginCountdown(_ region: CaptureRegion) {
-        // The countdown is the only window in which transient interface can be opened: a menu bar
-        // panel disappears as soon as anything is clicked, so it has to be opened after the region
-        // is confirmed and before this countdown runs out. Keep it at least a second.
+        // Leave time to arrange the target or reopen transient content if its owner dismissed it.
         let seconds = max(1, countdownSeconds)
         self.region = region
         recordingTitle = region.title

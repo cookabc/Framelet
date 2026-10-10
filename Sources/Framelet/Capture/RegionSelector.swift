@@ -7,6 +7,8 @@ final class RegionSelector {
     private var windows: [NSWindow] = []
     private var completion: ((CaptureRegion?) -> Void)?
     private var confirmationTask: Task<Void, Never>?
+    private let keyboard = SelectionKeys()
+    private var confirmingWithKeyboard = false
 
     func begin(completion: @escaping (CaptureRegion?) -> Void) async throws {
         try Task.checkCancellation()
@@ -50,6 +52,12 @@ final class RegionSelector {
                 frame: WindowSelection.appKitRect(fromQuartz: quartz, primaryTop: primaryTop),
                 title: owner + " · Menu", isMenu: true)
         }
+        let commands = keyboard.start { [weak self] command in
+            if command == .cancel { self?.cancel() } else { self?.confirmHovered() }
+        }
+        var hints = ["\(RecorderShortcuts.captureLabel) to confirm"]
+        if commands.contains(.confirm) { hints.append("Return to confirm") }
+        hints.append(commands.contains(.cancel) ? "⎋ / right-click to cancel" : "Right-click to cancel")
         for screen in NSScreen.screens {
             let window = SelectionPanel(frame: screen.frame)
             window.setFrame(screen.frame, display: true)
@@ -66,6 +74,8 @@ final class RegionSelector {
             let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
             view.screenOrigin = screen.frame.origin
             view.candidates = candidates
+            view.keyboardHint = hints.joined(separator: " · ")
+            view.onKeyboardConfirm = { [weak self] in self?.confirmHovered() }
             view.onCancel = { [weak self] in self?.cancel() }
             view.onSelect = { [weak self] rect in
                 self?.finish(
@@ -84,15 +94,29 @@ final class RegionSelector {
             view.updateHover(globalPoint: NSEvent.mouseLocation)
             windows.append(window)
         }
-        (windows.first { $0.frame.contains(NSEvent.mouseLocation) } ?? windows.first)?.makeKey()
     }
 
     func cancel() { finish(nil) }
+
+    func confirmHovered() {
+        guard confirmationTask == nil,
+            let window = windows.first(where: { $0.frame.contains(NSEvent.mouseLocation) }),
+            let view = window.contentView as? SelectionView
+        else { return }
+        view.updateHover(globalPoint: NSEvent.mouseLocation)
+        confirmingWithKeyboard = true
+        defer { confirmingWithKeyboard = false }
+        view.confirmWindow()
+    }
 
     private func finish(_ region: CaptureRegion?) {
         guard completion != nil else { return }
         if let region {
             guard confirmationTask == nil else { return }
+            if confirmingWithKeyboard {
+                closeAndComplete(region)
+                return
+            }
             // Consume the second click before removing the overlay; otherwise a double-click
             // can reach the target title bar and unzoom the window after confirmation.
             confirmationTask = Task { @MainActor [weak self] in
@@ -109,6 +133,7 @@ final class RegionSelector {
         let callback = completion
         completion = nil
         confirmationTask = nil
+        keyboard.stop()
         for window in windows {
             window.orderOut(nil)
             window.close()

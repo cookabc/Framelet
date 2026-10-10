@@ -154,12 +154,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .paused: title = "Stop and Save  \(model.formattedElapsed)"
         case .pausing: title = "Pausing…"
         case .restarting: title = "Saving, then restarting…"
-        case .countdown, .selecting: title = "Cancel Recording"
+        case .selecting: title = "Cancel Selection"
+        case .countdown: title = "Cancel Recording"
         case .starting: title = "Starting…"
         case .stopping: title = "Saving…"
         case .idle: title = "New Recording  \(RecorderShortcuts.captureLabel)"
         }
-        let item = menu.addItem(withTitle: title, action: #selector(toggleRecording), keyEquivalent: "")
+        let item = menu.addItem(
+            withTitle: title,
+            action: model.phase == .selecting ? #selector(cancelSelection) : #selector(toggleRecording),
+            keyEquivalent: "")
         item.target = self
         if model.canControlRecording {
             menu.addItem(
@@ -180,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleRecording() { model.toggleCapture() }
+    @objc private func cancelSelection() { model.cancelSelection() }
     @objc private func togglePause() { model.togglePause() }
     @objc private func restartRecording() { model.restartRecording() }
     @objc private func showWindow() {

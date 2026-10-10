@@ -115,10 +115,8 @@ private struct RecordingHUD: View {
         .foregroundStyle(.white).background(
             Color(red: 0.09, green: 0.14, blue: 0.15), in: RoundedRectangle(cornerRadius: 15))
     }
-    /// A menu bar panel vanishes the moment anything is clicked, so the countdown is the only
-    /// chance to open one by hand. Say so where the user is already looking.
     private var subtitle: String {
-        if case .countdown = model.phase { return "Open the menu or panel you want to capture" }
+        if case .countdown = model.phase { return "Keep your menu open, or arrange what you want to capture" }
         return model.recordingTitle
     }
 

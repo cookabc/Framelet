@@ -8,14 +8,16 @@ final class SelectionPanel: NSPanel {
             defer: false)
         title = "Choose Recording Area"
         hidesOnDeactivate = false
-        becomesKeyOnlyIfNeeded = false
+        becomesKeyOnlyIfNeeded = true
         isFloatingPanel = true
         isMovable = false
         isMovableByWindowBackground = false
         ignoresMouseEvents = false
         isReleasedWhenClosed = false
     }
-    override var canBecomeKey: Bool { true }
+    // Even a nonactivating panel can steal key focus and dismiss another app's popover.
+    // Keyboard confirmation is handled by temporary hot keys instead.
+    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
 
@@ -25,6 +27,8 @@ final class SelectionView: NSView {
     var onCancel: (() -> Void)?
     var screenOrigin: CGPoint = .zero
     var candidates: [WindowCandidate] = []
+    var keyboardHint = "Return to confirm · ⎋ to cancel"
+    var onKeyboardConfirm: (() -> Void)?
     private var hovered: WindowCandidate?
     private var anchor: CGPoint?
     private var selection: CGRect?
@@ -32,6 +36,7 @@ final class SelectionView: NSView {
     private var mouseTracking: NSTrackingArea?
     private var committed = false
     override var acceptsFirstResponder: Bool { true }
+    override var needsPanelToBecomeKey: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
@@ -69,13 +74,12 @@ final class SelectionView: NSView {
         if event.keyCode == 53 {
             onCancel?()
         } else if event.keyCode == 36 || event.keyCode == 76 {
-            confirmWindow()
+            if let onKeyboardConfirm { onKeyboardConfirm() } else { confirmWindow() }
         }
     }
     override func rightMouseDown(with event: NSEvent) { onCancel?() }
     override func mouseDown(with event: NSEvent) {
         guard !committed else { return }
-        window?.makeKey()
         anchor = nil
         let location = point(event)
         updateHover(globalPoint: CGPoint(x: location.x + screenOrigin.x, y: location.y + screenOrigin.y))
@@ -115,7 +119,7 @@ final class SelectionView: NSView {
         anchor = nil
         onSelect?(selection.integral.intersection(bounds))
     }
-    private func confirmWindow() {
+    func confirmWindow() {
         guard !committed, let hovered else { return }
         committed = true
         anchor = nil
@@ -147,12 +151,17 @@ final class SelectionView: NSView {
             outline.lineWidth = 1.5
             outline.stroke()
             let size =
-                hovered.map { String($0.title.prefix(65)) + "  ·  Click to record this window" }
+                hovered.map {
+                    String($0.title.prefix(65))
+                        + ($0.isMenu
+                            ? "  ·  Press \(RecorderShortcuts.captureLabel) to record this area"
+                            : "  ·  Click to record this window")
+                }
                 ?? "\(Int(selection.width)) × \(Int(selection.height))"
             drawLabel(size, at: CGPoint(x: selection.midX, y: max(20, selection.minY - 34)), fontSize: 12)
         }
         drawLabel(
-            "Click a window · Drag an area · Return to confirm · ⎋ to cancel",
+            "Click a window · Drag an area · \(keyboardHint)",
             at: CGPoint(x: bounds.midX, y: bounds.height - 96), fontSize: 15)
     }
 
