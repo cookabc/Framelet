@@ -53,8 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "关于 Framelet", action: #selector(about), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "隐藏 Framelet", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "退出 Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(
+            withTitle: "隐藏 Framelet", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(
+            withTitle: "退出 Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
         let fileItem = NSMenuItem()
@@ -145,7 +147,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(withTitle: "显示主窗口", action: #selector(showWindow), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "退出 Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(
+            withTitle: "退出 Framelet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     }
 
     @objc private func toggleRecording() { model.toggleCapture() }

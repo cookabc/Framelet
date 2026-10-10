@@ -376,16 +376,22 @@ final class RecorderModel: ObservableObject {
             }
         case .failure(let error):
             // Keep completed segments available after a window closes or resume fails.
+            let kept: Bool
             if !segments.isEmpty {
                 setPhase(.paused)
+                kept = true
             } else {
                 panel?.close()
                 panel = nil
                 setPhase(.idle)
-                discardSessionIfUnusable()
+                kept = !discardSessionIfUnusable()
             }
             reportCaptureFailure(error, action: "录制")
-            errorMessage = (errorMessage ?? "录制中断。") + "\n已写入的片段保留在录制文件夹中的「未完成录制」。"
+            // Only promise the segments were kept when a folder with something in it survived.
+            if kept {
+                errorMessage =
+                    (errorMessage ?? "录制中断。") + "\n已写入的片段保留在录制文件夹中的「未完成录制」。"
+            }
             showWindow?()
         }
     }
@@ -425,12 +431,13 @@ final class RecorderModel: ObservableObject {
 
     /// Drops a session folder that ended up holding nothing decodable, so a take that failed
     /// before the encoder wrote a frame does not leave an invisible folder behind.
-    private func discardSessionIfUnusable() {
-        guard let sessionDirectory,
-            RecordingLibrary.usableSegments(in: sessionDirectory).isEmpty
-        else { return }
+    /// Returns whether a folder with usable segments is still on disk.
+    private func discardSessionIfUnusable() -> Bool {
+        guard let sessionDirectory else { return false }
+        guard RecordingLibrary.usableSegments(in: sessionDirectory).isEmpty else { return true }
         RecordingLibrary.removeSession(sessionDirectory, in: libraryURL)
         self.sessionDirectory = nil
+        return false
     }
 
     /// Joins takes that were interrupted before their segments were assembled — quitting the app
