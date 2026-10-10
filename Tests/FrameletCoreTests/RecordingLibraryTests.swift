@@ -119,6 +119,35 @@ final class RecordingLibraryTests: XCTestCase {
             "A take that succeeds on its own must not leave an empty container behind.")
     }
 
+    func testLegacySessionFolderIsRecoveredAndPrunedLikeTheCurrentOne() throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = root.appendingPathComponent("recordings", isDirectory: true)
+        let legacyContainer = library.appendingPathComponent(
+            RecordingLibrary.legacySessionFolderName, isDirectory: true)
+        let legacySession = legacyContainer.appendingPathComponent("old-take", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacySession, withIntermediateDirectories: true)
+        try Data([7]).write(to: legacySession.appendingPathComponent("segment-a.mp4"))
+        try stamp(legacySession, at: 500)
+
+        XCTAssertEqual(
+            RecordingLibrary.unfinishedSessions(in: library).map(\.lastPathComponent), ["old-take"],
+            "Sessions recorded by an older build must still be recovered.")
+
+        let outsider = root.appendingPathComponent("keep.txt")
+        try Data([9]).write(to: outsider)
+        RecordingLibrary.removeSession(outsider, in: library)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: outsider.path),
+            "The legacy container must not widen what removeSession may delete.")
+
+        RecordingLibrary.removeSession(legacySession, in: library)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacySession.path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: legacyContainer.path),
+            "A legacy container emptied by recovery must not be left behind either.")
+    }
+
     private func stamp(_ url: URL, at seconds: TimeInterval) throws {
         try FileManager.default.setAttributes(
             [.creationDate: Date(timeIntervalSince1970: seconds)], ofItemAtPath: url.path)

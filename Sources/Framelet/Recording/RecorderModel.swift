@@ -113,10 +113,12 @@ final class RecorderModel: ObservableObject {
             SettingsKey.gifWidth: 960,
             SettingsKey.countdownSeconds: 3,
         ])
-        fps = defaults.integer(forKey: SettingsKey.fps)
+        // Stored values are clamped back into the ranges the capture and export paths accept,
+        // so a hand-edited or stale default cannot reach them verbatim.
+        fps = min(240, max(1, defaults.integer(forKey: SettingsKey.fps)))
         showsCursor = defaults.bool(forKey: SettingsKey.showsCursor)
-        gifFPS = defaults.integer(forKey: SettingsKey.gifFPS)
-        gifWidth = defaults.integer(forKey: SettingsKey.gifWidth)
+        gifFPS = min(30, max(1, defaults.integer(forKey: SettingsKey.gifFPS)))
+        gifWidth = min(1920, max(64, defaults.integer(forKey: SettingsKey.gifWidth)))
         countdownSeconds = max(1, defaults.integer(forKey: SettingsKey.countdownSeconds))
         reloadClips()
     }
@@ -508,18 +510,20 @@ final class RecorderModel: ObservableObject {
     func recoverUnfinishedSessions() async {
         let sessions = RecordingLibrary.unfinishedSessions(in: libraryURL)
         guard !sessions.isEmpty else {
-            // Nothing to recover, but an earlier take may have left the container empty.
-            RecordingLibrary.pruneEmptySessionContainer(in: libraryURL)
+            // Nothing to recover, but an earlier take may have left a container empty.
+            RecordingLibrary.pruneEmptySessionContainers(in: libraryURL)
             return
         }
         var recovered = 0
         var stranded = 0
+        var discarded = 0
         for session in sessions {
             // A recording started while this is running must not have its session touched.
             guard phase == .idle, !exporting else { return }
             let segments = RecordingLibrary.usableSegments(in: session)
             guard !segments.isEmpty else {
                 RecordingLibrary.removeSession(session, in: libraryURL)
+                discarded += 1
                 continue
             }
             do {
@@ -531,27 +535,35 @@ final class RecorderModel: ObservableObject {
                 // place. Only a session with nothing decodable is safe to discard outright.
                 if let failure = error as? SessionAssemblyError, case .noVideo = failure {
                     RecordingLibrary.removeSession(session, in: libraryURL)
+                    discarded += 1
                 } else {
                     stranded += 1
                 }
             }
         }
-        guard recovered > 0 || stranded > 0 else { return }
+        guard recovered > 0 || stranded > 0 || discarded > 0 else { return }
         if recovered > 0 { reloadClips() }
         // A session that cannot be joined is retried on every launch, so say so once rather than
-        // failing silently forever.
-        switch (recovered, stranded) {
-        case (let joined, 0):
-            notice =
-                joined == 1 ? "Recovered 1 unfinished recording" : "Recovered \(joined) unfinished recordings"
-        case (0, let stuck):
-            notice =
-                "\(stuck) unfinished recording\(stuck == 1 ? "" : "s") could not be joined."
-                + " The segments remain in the Unfinished folder."
-        case (let joined, let stuck):
-            notice =
-                "Recovered \(joined); \(stuck) could not be joined and remain in the Unfinished folder."
+        // failing silently forever. Discarding is announced too, because the failure notice of an
+        // interrupted take points at this folder and promises the segments were kept.
+        var parts: [String] = []
+        if recovered > 0 {
+            parts.append(
+                recovered == 1
+                    ? "Recovered 1 unfinished recording" : "Recovered \(recovered) unfinished recordings")
         }
+        if stranded > 0 {
+            parts.append(
+                "\(stranded) unfinished recording\(stranded == 1 ? "" : "s") could not be joined;"
+                    + " the segments remain in the Unfinished folder")
+        }
+        if discarded > 0 {
+            parts.append(
+                discarded == 1
+                    ? "1 that held nothing usable was discarded"
+                    : "\(discarded) that held nothing usable were discarded")
+        }
+        notice = parts.joined(separator: "; ")
     }
 
     // MARK: - Export

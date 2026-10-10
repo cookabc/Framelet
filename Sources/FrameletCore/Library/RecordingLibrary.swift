@@ -4,20 +4,33 @@ public enum RecordingLibrary {
     /// Holds the segments of a take that has not been joined into a recording yet.
     public static let sessionFolderName = "Unfinished"
 
+    /// Takes recorded before the folder was renamed to `Unfinished` left their sessions here.
+    public static let legacySessionFolderName = "未完成录制"
+
     public static func sessionContainer(in library: URL) -> URL {
         library.appendingPathComponent(sessionFolderName, isDirectory: true)
+    }
+
+    /// Every folder that can hold unfinished sessions, current name first.
+    public static func sessionContainers(in library: URL) -> [URL] {
+        [
+            sessionContainer(in: library),
+            library.appendingPathComponent(legacySessionFolderName, isDirectory: true),
+        ]
     }
 
     public static func newSessionURL(in library: URL) -> URL {
         sessionContainer(in: library).appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
-    /// Session folders left behind by takes that never finished, oldest first.
+    /// Session folders left behind by takes that never finished, oldest first. Both container names
+    /// are scanned so a take recorded by an older build is still recovered.
     public static func unfinishedSessions(in library: URL) -> [URL] {
-        let entries =
+        let entries = sessionContainers(in: library).flatMap { container in
             (try? FileManager.default.contentsOfDirectory(
-                at: sessionContainer(in: library), includingPropertiesForKeys: [.isDirectoryKey],
+                at: container, includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles])) ?? []
+        }
         return entries.filter(isDirectory).sorted { creationDate(of: $0) < creationDate(of: $1) }
     }
 
@@ -41,21 +54,25 @@ public enum RecordingLibrary {
     /// Deletes one session folder and, once it is gone, the container that held it.
     /// Confined to `library` so a stray path cannot delete anything else.
     public static func removeSession(_ session: URL, in library: URL) {
-        let container = sessionContainer(in: library).standardizedFileURL
-        guard session.standardizedFileURL.deletingLastPathComponent().path == container.path else { return }
+        let parents = Set(sessionContainers(in: library).map { $0.standardizedFileURL.path })
+        guard parents.contains(session.standardizedFileURL.deletingLastPathComponent().path) else {
+            return
+        }
         try? FileManager.default.removeItem(at: session)
-        pruneEmptySessionContainer(in: library)
+        pruneEmptySessionContainers(in: library)
     }
 
-    /// Removes the container once it holds nothing, so an empty folder is not left behind in the
-    /// library. The container is created lazily, so a take that succeeds on its first attempt would
-    /// otherwise leave it there for good.
-    public static func pruneEmptySessionContainer(in library: URL) {
-        let container = sessionContainer(in: library)
-        guard let remaining = try? FileManager.default.contentsOfDirectory(atPath: container.path),
-            remaining.isEmpty
-        else { return }
-        try? FileManager.default.removeItem(at: container)
+    /// Removes each container once it holds nothing, so an empty folder is not left behind in the
+    /// library. Containers are created lazily, so a take that succeeds on its first attempt would
+    /// otherwise leave them there for good.
+    public static func pruneEmptySessionContainers(in library: URL) {
+        for container in sessionContainers(in: library) {
+            guard
+                let remaining = try? FileManager.default.contentsOfDirectory(atPath: container.path),
+                remaining.isEmpty
+            else { continue }
+            try? FileManager.default.removeItem(at: container)
+        }
     }
 
     public static func moveToTrash(
