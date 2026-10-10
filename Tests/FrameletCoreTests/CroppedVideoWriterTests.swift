@@ -95,4 +95,30 @@ final class CroppedVideoWriterTests: XCTestCase {
                 source: CGRect(x: 90, y: 0, width: 30, height: 50),
                 displaySize: size, outputSize: size, fps: 30))
     }
+
+    func testSettingsOutsideTheSupportedRangeAreNamedAsSuch() throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let size = CGSize(width: 100, height: 50)
+        // An out-of-range frame rate is a settings problem, not a geometry one; the message must
+        // not send the user hunting for a display that is fine.
+        do {
+            _ = try CroppedVideoWriter(
+                url: root.appendingPathComponent("fps.mp4"), source: CGRect(origin: .zero, size: size),
+                displaySize: size, outputSize: size, fps: 0)
+            XCTFail("A frame rate outside 1...240 must be rejected")
+        } catch let error as NSError {
+            XCTAssertEqual(error.code, 2)
+            XCTAssertEqual(
+                error.localizedDescription, "The recording settings are outside the supported range.")
+        }
+        do {
+            _ = try CroppedVideoWriter(
+                url: root.appendingPathComponent("odd.mp4"), source: CGRect(origin: .zero, size: size),
+                displaySize: size, outputSize: CGSize(width: 101, height: 50), fps: 30)
+            XCTFail("Odd output dimensions must be rejected")
+        } catch let error as NSError {
+            XCTAssertEqual(error.code, 2)
+        }
+    }
 }

@@ -1,8 +1,10 @@
 import AVFoundation
 import CoreImage
+import os
 
 /// Crops composed display frames before encoding. Pixels outside the selection are never written to disk.
 public final class CroppedVideoWriter: @unchecked Sendable {
+    private static let log = Logger(subsystem: "studio.framelet", category: "crop-writer")
     private let queue = DispatchQueue(label: "studio.framelet.crop-writer")
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
@@ -29,16 +31,19 @@ public final class CroppedVideoWriter: @unchecked Sendable {
         guard
             [
                 source.minX, source.minY, source.width, source.height,
-                displaySize.width, displaySize.height, outputSize.width, outputSize.height,
+                displaySize.width, displaySize.height,
             ].allSatisfy({ $0.isFinite }),
             source.width > 0, source.height > 0, source.minX >= 0, source.minY >= 0,
             displaySize.width > 0, displaySize.height > 0,
-            CGRect(origin: .zero, size: displaySize).contains(source),
+            CGRect(origin: .zero, size: displaySize).contains(source)
+        else { throw Self.error("The recording area is outside the display.") }
+        guard
+            [outputSize.width, outputSize.height].allSatisfy({ $0.isFinite }),
             outputSize.width >= 2, outputSize.height >= 2,
             outputSize.width <= 8192, outputSize.height <= 8192,
             outputSize.width.truncatingRemainder(dividingBy: 2) == 0,
             outputSize.height.truncatingRemainder(dividingBy: 2) == 0, (1...240).contains(fps)
-        else { throw Self.error("The recording area is outside the display.") }
+        else { throw Self.error("The recording settings are outside the supported range.", code: 2) }
         self.url = url
         self.source = source
         self.displaySize = displaySize
@@ -88,7 +93,12 @@ public final class CroppedVideoWriter: @unchecked Sendable {
                 guard writer.status == .writing else {
                     throw writer.error ?? Self.error("The video encoder stopped unexpectedly.")
                 }
-                guard input.isReadyForMoreMediaData else { return }
+                guard input.isReadyForMoreMediaData else {
+                    // Backpressure drops frames rather than queueing whole display buffers; the
+                    // timeline stays correct because every appended frame keeps its own timestamp.
+                    Self.log.debug("The encoder is behind; dropped a video frame.")
+                    return
+                }
                 guard let pool = adaptor.pixelBufferPool else {
                     throw Self.error("The video encoder did not allocate its frame pool.")
                 }
@@ -167,8 +177,9 @@ public final class CroppedVideoWriter: @unchecked Sendable {
         }
     }
 
-    private static func error(_ message: String) -> NSError {
+    private static func error(_ message: String, code: Int = 1) -> NSError {
         NSError(
-            domain: "Framelet.CroppedVideoWriter", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            domain: "Framelet.CroppedVideoWriter", code: code,
+            userInfo: [NSLocalizedDescriptionKey: message])
     }
 }

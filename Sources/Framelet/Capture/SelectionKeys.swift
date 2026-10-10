@@ -64,7 +64,15 @@ final class SelectionKeys {
     }
 
     deinit {
-        for key in keys { UnregisterEventHotKey(key) }
-        if let handler { RemoveEventHandler(handler) }
+        // `stop` already tears everything down on the main thread on every real path; this only
+        // guards the ones that skip it. Carbon registration belongs on the main thread and deinit
+        // has no isolation guarantee, so hop over unless already there.
+        let leftoverKeys = keys
+        let leftoverHandler = handler
+        let teardown = {
+            for key in leftoverKeys { UnregisterEventHotKey(key) }
+            if let leftoverHandler { RemoveEventHandler(leftoverHandler) }
+        }
+        if Thread.isMainThread { teardown() } else { DispatchQueue.main.async(execute: teardown) }
     }
 }
