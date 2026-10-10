@@ -21,19 +21,34 @@ final class RegionSelector {
             as? [[String: Any]] ?? []
         let candidates: [WindowCandidate] = descriptions.compactMap { item in
             guard let id = (item[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
-                let window = shareable[id], window.windowLayer == 0,
-                let app = window.owningApplication,
-                app.processID != ProcessInfo.processInfo.processIdentifier,
-                (item[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                let layer = (item[kCGWindowLayer as String] as? NSNumber)?.intValue,
+                let owner = item[kCGWindowOwnerName as String] as? String,
                 let bounds = item[kCGWindowBounds as String] as? [String: Any],
                 let quartz = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-                quartz.width >= 24, quartz.height >= 24
+                quartz.width >= 24, quartz.height >= 24,
+                (item[kCGWindowAlpha as String] as? Double ?? 1) > 0
             else { return nil }
-            let title = window.title.flatMap { $0.isEmpty ? nil : $0 }
+            // Menu-level windows (dropdowns) are not in ScreenCaptureKit's list, so they are accepted
+            // from the WindowServer list alone and recorded as an area.
+            let isMenu = WindowSelection.acceptsMenu(layer: layer, owner: owner)
+            if !isMenu {
+                guard let window = shareable[id], window.windowLayer == 0,
+                    let app = window.owningApplication,
+                    app.processID != ProcessInfo.processInfo.processIdentifier
+                else { return nil }
+                let title = window.title.flatMap { $0.isEmpty ? nil : $0 }
+                return WindowCandidate(
+                    id: id, ownerPID: app.processID,
+                    frame: WindowSelection.appKitRect(fromQuartz: quartz, primaryTop: primaryTop),
+                    title: app.applicationName + (title.map { " · " + $0 } ?? ""))
+            }
+            guard let pid = (item[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                pid != ProcessInfo.processInfo.processIdentifier
+            else { return nil }
             return WindowCandidate(
-                id: id, ownerPID: app.processID,
+                id: id, ownerPID: pid,
                 frame: WindowSelection.appKitRect(fromQuartz: quartz, primaryTop: primaryTop),
-                title: app.applicationName + (title.map { " · " + $0 } ?? ""))
+                title: owner + " · Menu", isMenu: true)
         }
         for screen in NSScreen.screens {
             let window = SelectionPanel(frame: screen.frame)

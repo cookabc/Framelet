@@ -119,7 +119,12 @@ final class SelectionView: NSView {
         guard !committed, let hovered else { return }
         committed = true
         anchor = nil
-        onWindowSelect?(hovered)
+        // A dropdown cannot be captured as a window, so its frame is recorded as the area it covers.
+        if hovered.isMenu {
+            onSelect?(hovered.frame.offsetBy(dx: -screenOrigin.x, dy: -screenOrigin.y).intersection(bounds))
+        } else {
+            onWindowSelect?(hovered)
+        }
     }
     private func point(_ event: NSEvent) -> CGPoint {
         let point = convert(event.locationInWindow, from: nil)
