@@ -104,18 +104,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 return noErr
             }, 1, &type, Unmanaged.passUnretained(self).toOpaque(), &eventHandler)
-        let id = EventHotKeyID(signature: RecorderShortcuts.signature, id: 1)
-        let result = RegisterEventHotKey(
-            RecorderShortcuts.captureKey, RecorderShortcuts.modifiers, id, GetApplicationEventTarget(),
-            OptionBits(kEventHotKeyExclusive), &hotKey)
-        if result != noErr { model.notice = "The record shortcut is already taken. Use the buttons instead." }
-        let pauseResult = RegisterEventHotKey(
-            RecorderShortcuts.pauseKey, RecorderShortcuts.modifiers,
-            EventHotKeyID(signature: RecorderShortcuts.signature, id: 2), GetApplicationEventTarget(),
-            OptionBits(kEventHotKeyExclusive), &pauseHotKey)
-        if pauseResult != noErr {
-            model.notice = "The pause shortcut is already taken. Use the buttons instead."
+        // Both keys share one modifier set, so try whole sets in order and keep the first whose
+        // keys are both free. Registering a combination another app already owns fails, which is
+        // how a conflict is detected rather than guessed at.
+        for candidate in RecorderShortcuts.modifierSets {
+            let capture = RegisterEventHotKey(
+                RecorderShortcuts.captureKey, candidate.modifiers,
+                EventHotKeyID(signature: RecorderShortcuts.signature, id: 1), GetApplicationEventTarget(),
+                OptionBits(kEventHotKeyExclusive), &hotKey)
+            guard capture == noErr else { continue }
+            let pause = RegisterEventHotKey(
+                RecorderShortcuts.pauseKey, candidate.modifiers,
+                EventHotKeyID(signature: RecorderShortcuts.signature, id: 2), GetApplicationEventTarget(),
+                OptionBits(kEventHotKeyExclusive), &pauseHotKey)
+            guard pause == noErr else {
+                // Hand the record key back before trying the next set.
+                if let registered = hotKey { UnregisterEventHotKey(registered) }
+                hotKey = nil
+                continue
+            }
+            RecorderShortcuts.select(candidate)
+            if candidate.modifiers != RecorderShortcuts.preferred.modifiers {
+                model.notice =
+                    "Another app owns \(RecorderShortcuts.preferred.captureLabel), so recording uses "
+                    + "\(candidate.captureLabel) and \(candidate.pauseLabel)."
+            }
+            return
         }
+        model.notice =
+            "Every recording shortcut is taken by another app. Use the buttons instead, or quit the app holding it."
     }
 
     private func refreshStatus() {

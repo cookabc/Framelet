@@ -177,6 +177,16 @@ struct MainView: View {
                 .padding(.vertical, 8).contentShape(Rectangle())
             Spacer()
             Menu {
+                Picker("Countdown", selection: $model.countdownSeconds) {
+                    Text("3 s").tag(3)
+                    Text("5 s").tag(5)
+                    Text("10 s").tag(10)
+                }.pickerStyle(.inline)
+            } label: {
+                Text("Countdown: \(model.countdownSeconds) s")
+            }
+            .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
+            Menu {
                 Picker("Frame rate", selection: $model.fps) {
                     Text("30 fps").tag(30)
                     Text("60 fps").tag(60)

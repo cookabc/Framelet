@@ -81,26 +81,53 @@ final class LibraryInteractionTests: XCTestCase {
         XCTAssertTrue(first.showsCursor)
         XCTAssertEqual(first.gifFPS, 15)
         XCTAssertEqual(first.gifWidth, 960)
+        XCTAssertEqual(first.countdownSeconds, 3)
 
         first.fps = 60
         first.showsCursor = false
         first.gifFPS = 20
         first.gifWidth = 1280
+        first.countdownSeconds = 10
 
         let relaunched = RecorderModel(libraryURL: root, defaults: defaults)
         XCTAssertEqual(relaunched.fps, 60)
         XCTAssertFalse(relaunched.showsCursor)
         XCTAssertEqual(relaunched.gifFPS, 20)
         XCTAssertEqual(relaunched.gifWidth, 1280)
+        XCTAssertEqual(relaunched.countdownSeconds, 10)
     }
 
-    func testShortcutsStayOutOfTheWayOfOrdinaryAppMenus() async {
+    func testRubbishStoredCountdownStillLeavesACountableDelay() async throws {
+        let suite = "FrameletCountdownTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let writer = RecorderModel(libraryURL: root, defaults: defaults)
+        writer.countdownSeconds = 0
+
+        // Reading a stored 0 back must not leave a zero-length "1...seconds" range, which traps.
+        let relaunched = RecorderModel(libraryURL: root, defaults: defaults)
+        XCTAssertEqual(relaunched.countdownSeconds, 1)
+    }
+
+    func testEveryShortcutCandidateStaysOutOfTheWayOfOrdinaryAppMenus() async {
         XCTAssertEqual(RecorderShortcuts.captureKey, UInt32(kVK_ANSI_R))
-        // Option-Control-R belongs to Rectangle, so Option must stay out of the combination.
-        XCTAssertEqual(RecorderShortcuts.modifiers & UInt32(optionKey), 0)
-        // Registering these globally and exclusively means a bare Command combination would be
-        // taken from every app, so both Command and Control have to be present.
-        XCTAssertNotEqual(RecorderShortcuts.modifiers & UInt32(cmdKey), 0)
-        XCTAssertNotEqual(RecorderShortcuts.modifiers & UInt32(controlKey), 0)
+        XCTAssertEqual(RecorderShortcuts.pauseKey, UInt32(kVK_ANSI_P))
+        XCTAssertGreaterThan(
+            RecorderShortcuts.modifierSets.count, 1,
+            "Another app owning a combination needs somewhere to fall back to.")
+        for set in RecorderShortcuts.modifierSets {
+            // These are registered globally and exclusively, so a bare Command combination would be
+            // taken away from every app: Command always comes with at least one more modifier.
+            XCTAssertNotEqual(set.modifiers & UInt32(cmdKey), 0)
+            XCTAssertGreaterThanOrEqual(set.modifiers.nonzeroBitCount, 2)
+            // Control-Option-R belongs to Rectangle, so the two never appear together.
+            XCTAssertNotEqual(
+                set.modifiers & UInt32(controlKey | optionKey), UInt32(controlKey | optionKey),
+                "\(set.captureLabel) collides with Rectangle")
+        }
     }
 }

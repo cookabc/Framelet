@@ -18,8 +18,8 @@ when the system asks.
 
 | Action | How |
 | --- | --- |
-| Start / stop | `⌃⌘R`, or the "New Recording" and "Stop" buttons |
-| Pause / resume | `⌃⌘P`, or the matching buttons on the floating bar |
+| Start / stop | `⌥⌘R`, or the "New Recording" and "Stop" buttons |
+| Pause / resume | `⌥⌘P`, or the matching buttons on the floating bar |
 | Choose a window | Hover to highlight, then click or press Return |
 | Choose an area | Drag out the area and release |
 | Cancel choosing | Press Escape or right-click |
@@ -27,9 +27,24 @@ when the system asks.
 | Export | "Save Video" or "Export GIF" |
 | Delete | "Delete", or right-click a recording in the list, then confirm to move it to the Trash |
 
-Recording starts after a three-second countdown. Paused time is not counted towards the video's
-length. Closing the main window leaves the app running in the menu bar. The shortcuts are registered
-exclusively; if another app already owns one, use the window or menu bar buttons instead.
+Recording starts after a countdown, three seconds by default and settable to 5 or 10. Paused time is
+not counted towards the video's length. Closing the main window leaves the app running in the menu
+bar.
+
+The shortcuts are registered as exclusive global hot keys, so they can collide with another app.
+Registration reports the collision rather than assuming success, and the app then falls back to the
+next combination it can claim — `⌃⌘R` and `⌃⌘P`, then `⌃⇧⌘R` and `⌃⇧⌘P`. Whichever combination is
+actually in use is what the window, the menu bar and this file report, and the status line says so
+when the preferred one was taken.
+
+### Capturing something that closes when you click
+
+A menu bar panel, a dropdown or a context menu disappears the moment anything is clicked, so it
+cannot be captured by clicking on it — clicking to choose it is what dismisses it. Choose the area it
+appears in *first*, while it is closed, then open it during the countdown: the floating bar prompts
+you at that point. Raise the countdown to 5 or 10 seconds if three is not enough time. The area is
+remembered by "Record Again" on the floating bar, so a second take over the same area needs no
+selection at all.
 
 ## Recording and files
 
@@ -54,9 +69,10 @@ exclusively; if another app already owns one, use the window or menu bar buttons
 - Exports are written to a temporary file and only replace the destination on success, so cancelling or
   failing leaves any existing file untouched. Cancelling a video export stops the copy immediately
   instead of waiting for the whole file.
-- The recording options — frame rate, cursor visibility, and the animated image's frame rate and long
-  edge — are remembered between launches, along with the main window's size and position. The animated
-  image's start and duration are reset per recording, since they describe the selected clip.
+- The recording options — frame rate, cursor visibility, countdown length, and the animated image's
+  frame rate and long edge — are remembered between launches, along with the main window's size and
+  position. The animated image's start and duration are reset per recording, since they describe the
+  selected clip.
 
 ## Development and installation
 

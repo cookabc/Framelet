@@ -10,6 +10,7 @@ private enum SettingsKey {
     static let showsCursor = "showsCursor"
     static let gifFPS = "gifFPS"
     static let gifWidth = "gifWidth"
+    static let countdownSeconds = "countdownSeconds"
 }
 
 @MainActor
@@ -42,6 +43,11 @@ final class RecorderModel: ObservableObject {
     }
     @Published var gifWidth = 960 {
         didSet { defaults.set(gifWidth, forKey: SettingsKey.gifWidth) }
+    }
+    /// How long to wait after the region is confirmed before capture starts. Raise it to capture
+    /// something that has to be opened by hand, such as a menu bar panel.
+    @Published var countdownSeconds = 3 {
+        didSet { defaults.set(countdownSeconds, forKey: SettingsKey.countdownSeconds) }
     }
     /// Per-clip: reset from the selected recording, so it is deliberately not remembered.
     @Published var recordingTitle = "Region"
@@ -105,11 +111,13 @@ final class RecorderModel: ObservableObject {
             SettingsKey.showsCursor: true,
             SettingsKey.gifFPS: 15,
             SettingsKey.gifWidth: 960,
+            SettingsKey.countdownSeconds: 3,
         ])
         fps = defaults.integer(forKey: SettingsKey.fps)
         showsCursor = defaults.bool(forKey: SettingsKey.showsCursor)
         gifFPS = defaults.integer(forKey: SettingsKey.gifFPS)
         gifWidth = defaults.integer(forKey: SettingsKey.gifWidth)
+        countdownSeconds = max(1, defaults.integer(forKey: SettingsKey.countdownSeconds))
         reloadClips()
     }
 
@@ -286,6 +294,10 @@ final class RecorderModel: ObservableObject {
     }
 
     private func beginCountdown(_ region: CaptureRegion) {
+        // The countdown is the only window in which transient interface can be opened: a menu bar
+        // panel disappears as soon as anything is clicked, so it has to be opened after the region
+        // is confirmed and before this countdown runs out. Keep it at least a second.
+        let seconds = max(1, countdownSeconds)
         self.region = region
         recordingTitle = region.title
         clock.reset()
@@ -295,9 +307,9 @@ final class RecorderModel: ObservableObject {
         let panel = RecordingPanel(model: self)
         self.panel = panel
         panel.show(near: region)
-        setPhase(.countdown(3))
+        setPhase(.countdown(seconds))
         countdownTask = Task {
-            for value in (1...3).reversed() {
+            for value in (1...seconds).reversed() {
                 setPhase(.countdown(value))
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
