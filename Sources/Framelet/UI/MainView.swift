@@ -71,8 +71,12 @@ struct MainView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("My Recordings", systemImage: "viewfinder")
-                .font(.system(size: 20, weight: .semibold)).padding(.top, 6)
+            // The English heading and folder button are wider than the Chinese labels this sidebar
+            // was sized for, so they shrink on one line instead of wrapping onto two.
+            HStack(spacing: 6) {
+                Image(systemName: "viewfinder")
+                Text("My Recordings").lineLimit(1).minimumScaleFactor(0.8)
+            }.font(.system(size: 20, weight: .semibold)).padding(.top, 6)
             Button {
                 model.beginSelection()
             } label: {
@@ -109,13 +113,14 @@ struct MainView: View {
             Button {
                 model.revealLibrary()
             } label: {
-                Label("Recordings Folder", systemImage: "folder").frame(maxWidth: .infinity)
+                Label("Recordings Folder", systemImage: "folder")
+                    .lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
             }.buttonStyle(RecorderButtonStyle())
             VStack(alignment: .leading, spacing: 7) {
                 shortcut("Start / stop", RecorderShortcuts.captureLabel)
                 shortcut("Pause / resume", RecorderShortcuts.pauseLabel)
             }.font(.system(size: 10)).foregroundStyle(.secondary)
-        }.padding(16).frame(width: 190).background(.white)
+        }.padding(16).frame(width: 212).background(.white)
     }
 
     private func shortcut(_ name: String, _ key: String) -> some View {
@@ -201,14 +206,15 @@ struct MainView: View {
             }.disabled(model.busy).controlSize(.large)
             HStack(spacing: 14) {
                 rangeField("Start", value: $model.gifStart, range: 0...max(0, model.duration - 0.1))
-                rangeField(
-                    "Duration", value: $model.gifDuration,
-                    range: 0.1...max(0.1, min(60, model.duration - model.gifStart)))
-                Text("Up to 60 s").font(.system(size: 10)).foregroundStyle(.secondary)
+                rangeField("Duration", value: $model.gifDuration, range: 0.1...maxGIFDuration)
+                // Reports the limit that actually applies, not just the app's own 60 s cap: on an
+                // 11 s recording the field refuses anything above 11, so "Up to 60 s" misled.
+                Text("Up to \(Int(maxGIFDuration.rounded())) s").font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }.disabled(model.busy || model.duration < 0.1)
                 .onChange(of: model.gifStart) { _, value in
                     model.gifStart = max(0, min(value, max(0, model.duration - 0.1)))
-                    model.gifDuration = max(0.1, min(model.gifDuration, model.duration - model.gifStart))
+                    model.gifDuration = max(0.1, min(model.gifDuration, maxGIFDuration))
                 }
             if model.exporting {
                 HStack {
@@ -265,6 +271,9 @@ struct MainView: View {
             Button("Stop") { model.stopRecording() }.buttonStyle(RecorderButtonStyle(tone: .destructive))
         }.disabled(!model.canControlRecording)
     }
+
+    /// The animated image cannot run past the end of the clip, whatever the app's own cap says.
+    private var maxGIFDuration: Double { max(0.1, min(60, model.duration - model.gifStart)) }
 
     private func clock(_ time: Double) -> String {
         let value = max(0, Int(time.isFinite ? time : 0))

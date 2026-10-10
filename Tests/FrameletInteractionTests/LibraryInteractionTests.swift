@@ -52,6 +52,22 @@ final class LibraryInteractionTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
     }
 
+    func testClipTitleKeepsAmPmSoAnAfternoonRecordingIsNotReadAsMorning() async throws {
+        // 15:37 local is what the Chinese-only build rendered as "03:37", which reads as the middle
+        // of the night and as a duration beside the player's own mm:ss readout.
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 10
+        components.day = 10
+        components.hour = 15
+        components.minute = 37
+        let date = try XCTUnwrap(Calendar.current.date(from: components))
+        let clip = RecordedClip(url: URL(fileURLWithPath: "/tmp/clip.mp4"), date: date)
+
+        XCTAssertTrue(clip.title.contains("PM"), "got \(clip.title)")
+        XCTAssertTrue(clip.title.contains("3:37"), "got \(clip.title)")
+    }
+
     func testRecordingSettingsSurviveRelaunchAndFallBackToDefaults() async throws {
         let suite = "FrameletSettingsTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
