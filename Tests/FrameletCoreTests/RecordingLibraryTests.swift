@@ -40,4 +40,64 @@ final class RecordingLibraryTests: XCTestCase {
         }
         XCTAssertEqual(try Data(contentsOf: external), Data([9]))
     }
+
+    func testUnfinishedSessionsAreOrderedAndSegmentsFollowCaptureOrder() throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = root.appendingPathComponent("recordings", isDirectory: true)
+        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+
+        let older = RecordingLibrary.newSessionURL(in: library)
+        let newer = RecordingLibrary.newSessionURL(in: library)
+        for session in [newer, older] {
+            try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        }
+        try stamp(older, at: 1_000)
+        try stamp(newer, at: 2_000)
+        // Compared by name: the directory listing reports /private/var where the fixture built /var.
+        XCTAssertEqual(
+            RecordingLibrary.unfinishedSessions(in: library).map(\.lastPathComponent),
+            [older.lastPathComponent, newer.lastPathComponent])
+
+        // A pause closes one segment and opens the next, so the second piece has to join second
+        // even though its name carries no ordering. Zero-length debris and stray files are skipped.
+        let first = newer.appendingPathComponent("segment-a.mp4")
+        let second = newer.appendingPathComponent("segment-b.mp4")
+        try Data([2]).write(to: first)
+        try Data([1]).write(to: second)
+        try Data().write(to: newer.appendingPathComponent("segment-empty.mp4"))
+        try Data([3]).write(to: newer.appendingPathComponent("notes.txt"))
+        try stamp(first, at: 10)
+        try stamp(second, at: 20)
+        XCTAssertEqual(
+            RecordingLibrary.usableSegments(in: newer).map(\.lastPathComponent),
+            [first.lastPathComponent, second.lastPathComponent])
+    }
+
+    func testRemoveSessionIsConfinedToTheLibraryAndClearsTheContainer() throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = root.appendingPathComponent("recordings", isDirectory: true)
+        let session = RecordingLibrary.newSessionURL(in: library)
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        try Data([1]).write(to: session.appendingPathComponent("segment-a.mp4"))
+
+        let outsider = root.appendingPathComponent("keep.txt")
+        try Data([9]).write(to: outsider)
+        RecordingLibrary.removeSession(outsider, in: library)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: outsider.path),
+            "Only folders directly inside the session container may be deleted.")
+
+        RecordingLibrary.removeSession(session, in: library)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: session.path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: RecordingLibrary.sessionContainer(in: library).path),
+            "An emptied container should not be left behind.")
+    }
+
+    private func stamp(_ url: URL, at seconds: TimeInterval) throws {
+        try FileManager.default.setAttributes(
+            [.creationDate: Date(timeIntervalSince1970: seconds)], ofItemAtPath: url.path)
+    }
 }
