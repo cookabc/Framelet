@@ -18,8 +18,8 @@ when the system asks.
 
 | Action | How |
 | --- | --- |
-| Start / stop | `⌃⇧⌘R`, or the "New Recording" and "Stop" buttons |
-| Pause / resume | `⌃⇧⌘P`, or the matching buttons on the floating bar |
+| Start / stop | `⌃⌘R`, or the "New Recording" and "Stop" buttons |
+| Pause / resume | `⌃⌘P`, or the matching buttons on the floating bar |
 | Choose a window | Hover to highlight, then click or press Return |
 | Choose an area | Drag out the area and release |
 | Cancel choosing | Press Escape or right-click |

@@ -94,10 +94,13 @@ final class LibraryInteractionTests: XCTestCase {
         XCTAssertEqual(relaunched.gifWidth, 1280)
     }
 
-    func testShortcutsAvoidRectangleOptionControlR() async {
+    func testShortcutsStayOutOfTheWayOfOrdinaryAppMenus() async {
         XCTAssertEqual(RecorderShortcuts.captureKey, UInt32(kVK_ANSI_R))
+        // Option-Control-R belongs to Rectangle, so Option must stay out of the combination.
         XCTAssertEqual(RecorderShortcuts.modifiers & UInt32(optionKey), 0)
+        // Registering these globally and exclusively means a bare Command combination would be
+        // taken from every app, so both Command and Control have to be present.
         XCTAssertNotEqual(RecorderShortcuts.modifiers & UInt32(cmdKey), 0)
-        XCTAssertNotEqual(RecorderShortcuts.modifiers & UInt32(shiftKey), 0)
+        XCTAssertNotEqual(RecorderShortcuts.modifiers & UInt32(controlKey), 0)
     }
 }
