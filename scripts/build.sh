@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if pgrep -x Framelet >/dev/null; then
-    echo "请先正常退出 Framelet，再构建并安装，避免覆盖正在运行的应用。" >&2
+    echo "Quit Framelet before building and installing, so the running app is not overwritten." >&2
     exit 1
 fi
 identity_file="$PWD/.framelet-signing-identity"
@@ -11,10 +11,16 @@ if [[ -z "$sign_identity" && -f "$identity_file" ]]; then
     sign_identity="$(cat "$identity_file")"
 fi
 if [[ -z "$sign_identity" ]]; then
-    sign_identity="$(security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([A-F0-9]\{40\}\) "Apple Development:.*$/\1/p' | head -n 1)"
+    # Accept either identity the README mentions. BSD sed has no alternation, hence two patterns.
+    sign_identity="$(
+        security find-identity -v -p codesigning \
+            | sed -n -e 's/^[[:space:]]*[0-9]*) \([A-F0-9]\{40\}\) "Apple Development:.*$/\1/p' \
+                -e 's/^[[:space:]]*[0-9]*) \([A-F0-9]\{40\}\) "Developer ID Application:.*$/\1/p' \
+            | head -n 1
+    )"
 fi
 if [[ -z "$sign_identity" || "$sign_identity" == "-" ]]; then
-    echo "需要固定的 Apple Development 或 Developer ID 签名身份。请设置 FRAMELET_SIGN_IDENTITY；不再回退到临时签名。" >&2
+    echo "A stable Apple Development or Developer ID signing identity is required. Set FRAMELET_SIGN_IDENTITY; the script no longer falls back to ad-hoc signing." >&2
     exit 1
 fi
 swift build -c release
@@ -29,7 +35,7 @@ codesign --force --sign "$sign_identity" "$app_path"
 codesign --verify --deep --strict "$app_path"
 signature_details="$(codesign -dv "$app_path" 2>&1)"
 if [[ ! "$signature_details" =~ TeamIdentifier=[A-Z0-9]{10} ]]; then
-    echo "签名缺少开发团队标识，未安装此构建。" >&2
+    echo "The signature has no team identifier, so this build was not installed." >&2
     exit 1
 fi
 printf '%s\n' "$sign_identity" > "$identity_file"
@@ -48,12 +54,12 @@ trap cleanup EXIT
 ditto "$app_path" "$stage_dir/Framelet.app"
 codesign --verify --deep --strict "$stage_dir/Framelet.app"
 if pgrep -x Framelet >/dev/null; then
-    echo "Framelet 在构建期间被打开，请退出后重新安装。" >&2
+    echo "Framelet was opened during the build. Quit it and install again." >&2
     exit 1
 fi
 if [[ -e "$install_path" ]]; then
     installed_id="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$install_path/Contents/Info.plist")"
-    [[ "$installed_id" == "studio.framelet.mac" ]] || { echo "安装路径被其他应用占用。" >&2; exit 1; }
+    [[ "$installed_id" == "studio.framelet.mac" ]] || { echo "Another application already occupies the install path." >&2; exit 1; }
     mv "$install_path" "$stage_dir/previous.app"
 fi
 mv "$stage_dir/Framelet.app" "$install_path"
