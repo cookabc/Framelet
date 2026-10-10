@@ -4,6 +4,10 @@ A native macOS window and area screen recorder. Pick a window or drag out an are
 pause, resume and restart are supported, and takes can be previewed and exported as a video or a
 looping animated image. This version records picture only, and all processing happens on this Mac.
 
+<p align="center">
+  <img src="docs/images/overview.png" width="720" alt="Framelet's main window: a recordings sidebar next to the start panel with the cursor, countdown and frame rate options">
+</p>
+
 ## Requirements
 
 - macOS 15 or later.
@@ -88,6 +92,8 @@ selects an arbitrary area.
 
 ## Development and installation
 
+Clone the repository with `git clone https://github.com/cookabc/Framelet.git`, then:
+
 ```sh
 # Compile and test without installing the app
 swift build
@@ -167,3 +173,7 @@ and never edits or resets the system's permission itself.
 
 Under the hood it uses Apple's [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit)
 and [Image I/O](https://developer.apple.com/documentation/imageio).
+
+## License
+
+Framelet is released under the [MIT License](LICENSE).
