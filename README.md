@@ -113,7 +113,8 @@ rather than falling back to ad-hoc signing. An identity can also be named explic
 Local signing configuration, certificates, environment files, build caches and installed bundles are
 all excluded by `.gitignore`. Do not commit recordings or personal signing configuration. Distributing
 the app to others additionally needs Developer ID signing and notarisation; this script only handles
-building and installing locally.
+building and installing locally. For packaging without installation, run
+`bash scripts/build.sh --package-only`; it keeps the saved local signing identity unchanged.
 
 ### Code formatting
 

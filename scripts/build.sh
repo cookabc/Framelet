@@ -1,7 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-if pgrep -x Framelet >/dev/null; then
+package_only=false
+if [[ "${1:-}" == "--package-only" && "$#" -eq 1 ]]; then
+    package_only=true
+elif [[ "$#" -ne 0 ]]; then
+    echo "Usage: bash scripts/build.sh [--package-only]" >&2
+    exit 2
+fi
+if [[ "$package_only" == false ]] && pgrep -x Framelet >/dev/null; then
     echo "Quit Framelet before building and installing, so the running app is not overwritten." >&2
     exit 1
 fi
@@ -37,6 +44,10 @@ signature_details="$(codesign -dv "$app_path" 2>&1)"
 if [[ ! "$signature_details" =~ TeamIdentifier=[A-Z0-9]{10} ]]; then
     echo "The signature has no team identifier, so this build was not installed." >&2
     exit 1
+fi
+if [[ "$package_only" == true ]]; then
+    echo "Packaged: $app_path"
+    exit 0
 fi
 printf '%s\n' "$sign_identity" > "$identity_file"
 

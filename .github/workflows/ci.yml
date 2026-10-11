@@ -25,7 +25,7 @@ jobs:
         run: swift --version
       - name: Validate packaging files
         run: |
-          bash -n scripts/build.sh
+          for script in scripts/*.sh; do bash -n "$script"; done
           plutil -lint Resources/Info.plist
       - name: Lint formatting
         run: xcrun swift-format lint --strict --recursive Sources Tests scripts Package.swift
