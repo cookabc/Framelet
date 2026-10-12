@@ -79,8 +79,11 @@ public final class CroppedVideoWriter: @unchecked Sendable {
                 AVVideoCodecKey: codec.avCodecType,
                 AVVideoWidthKey: Int(outputSize.width), AVVideoHeightKey: Int(outputSize.height),
                 AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: ScreenVideoQuality.averageBitRate(
+                        pixelSize: outputSize, fps: fps, codec: codec),
                     AVVideoExpectedSourceFrameRateKey: fps,
                     AVVideoAllowFrameReorderingKey: false,
+                    AVVideoMaxKeyFrameIntervalKey: fps * 2,
                 ],
                 AVVideoColorPropertiesKey: [
                     AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
@@ -175,14 +178,38 @@ public final class CroppedVideoWriter: @unchecked Sendable {
             else { throw Self.error("There was not enough memory for a video frame.") }
             let sx = CGFloat(CVPixelBufferGetWidth(buffer)) / displaySize.width
             let sy = CGFloat(CVPixelBufferGetHeight(buffer)) / displaySize.height
-            let crop = CGRect(
+            var crop = CGRect(
                 x: source.minX * sx, y: (displaySize.height - source.maxY) * sy,
                 width: source.width * sx, height: source.height * sy)
-            let image = CIImage(cvPixelBuffer: buffer).cropped(to: crop)
+            // When even-dimension rounding is the only size difference, trim inward by at most
+            // two pixels rather than rescale the entire small image and soften every text edge.
+            let pixelAligned = crop.minX.rounded(.up)
+            let pixelBottom = crop.minY.rounded(.up)
+            if crop.width - outputSize.width >= -0.001, crop.width - outputSize.width < 2.001,
+                crop.height - outputSize.height >= -0.001, crop.height - outputSize.height < 2.001,
+                pixelAligned + outputSize.width <= crop.maxX + 0.001,
+                pixelBottom + outputSize.height <= crop.maxY + 0.001
+            {
+                crop = CGRect(
+                    x: pixelAligned, y: pixelBottom, width: outputSize.width, height: outputSize.height)
+            }
+            var image = CIImage(cvPixelBuffer: buffer).cropped(to: crop)
                 .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
-                .transformed(
-                    by: CGAffineTransform(
-                        scaleX: outputSize.width / crop.width, y: outputSize.height / crop.height))
+            if abs(outputSize.width - crop.width) > 0.001 || abs(outputSize.height - crop.height) > 0.001 {
+                if abs(outputSize.width / crop.width - outputSize.height / crop.height) < 0.001 {
+                    image = image.applyingFilter(
+                        "CILanczosScaleTransform",
+                        parameters: [
+                            kCIInputScaleKey: outputSize.height / crop.height,
+                            kCIInputAspectRatioKey: (outputSize.width / crop.width)
+                                / (outputSize.height / crop.height),
+                        ])
+                } else {
+                    image = image.transformed(
+                        by: CGAffineTransform(
+                            scaleX: outputSize.width / crop.width, y: outputSize.height / crop.height))
+                }
+            }
             let composed = compose(image, at: time)
             context.render(
                 composed, to: destination, bounds: CGRect(origin: .zero, size: outputSize),
