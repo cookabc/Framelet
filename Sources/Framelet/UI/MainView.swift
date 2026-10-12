@@ -148,8 +148,10 @@ struct MainView: View {
 
     private var preview: some View {
         VStack(spacing: 0) {
-            NativeVideoPreview(player: model.player).frame(minHeight: 120, maxHeight: .infinity).background(
-                .black)
+            NativeVideoPreview(
+                player: model.player, pixelSize: model.videoPixelSize, sizing: model.previewSizing
+            )
+            .frame(minHeight: 120, maxHeight: .infinity).background(.black)
             HStack(spacing: 10) {
                 Button {
                     model.togglePlayback()
@@ -167,8 +169,30 @@ struct MainView: View {
                     in: 0...max(model.duration, 0.1)
                 ).accessibilityLabel("Playback position").disabled(model.busy || model.duration <= 0)
                 Text(clock(model.duration)).monospacedDigit().frame(width: 42)
-                Text(model.resolution).foregroundStyle(.secondary).lineLimit(1)
+                Menu {
+                    Picker("Preview size", selection: $model.previewSizing) {
+                        Text("Original size").tag(VideoPreviewSizing.actualSize)
+                        Text("Fit window").tag(VideoPreviewSizing.fitWindow)
+                    }
+                } label: {
+                    Text(model.previewSizing == .actualSize ? "Original size" : "Fit window")
+                }.menuStyle(.borderlessButton).fixedSize()
+                    .help("Original size avoids enlarging small recordings. This changes preview only.")
+                    .accessibilityLabel("Preview size")
             }.font(.system(size: 11)).padding(8).background(.white)
+            if !model.resolution.isEmpty {
+                Text(
+                    model.resolution + " px · "
+                        + (model.previewSizing == .actualSize
+                            ? "Original size; shrinks only when needed"
+                            : "Fit preview; small videos may look softer")
+                )
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(
+                    .vertical, 4
+                )
+                .background(.white)
+            }
         }.clipShape(RoundedRectangle(cornerRadius: 12))
     }
 

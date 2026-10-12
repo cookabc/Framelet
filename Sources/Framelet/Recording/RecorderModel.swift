@@ -28,6 +28,8 @@ final class RecorderModel: ObservableObject {
     @Published var player: AVPlayer?
     @Published var duration = 0.0
     @Published var resolution = ""
+    @Published private(set) var videoPixelSize = CGSize.zero
+    @Published var previewSizing: VideoPreviewSizing = .actualSize
     @Published var playbackTime = 0.0
     @Published var isPlaying = false
     @Published var elapsed = 0.0
@@ -190,6 +192,7 @@ final class RecorderModel: ObservableObject {
         lastExport = nil
         duration = 0
         resolution = ""
+        videoPixelSize = .zero
         exportStart = 0
         exportDuration = 0
         metadataTask = Task {
@@ -203,11 +206,14 @@ final class RecorderModel: ObservableObject {
                         userInfo: [NSLocalizedDescriptionKey: "This recording has no playable video."])
                 }
                 let size = try await track.load(.naturalSize)
+                let transform = try await track.load(.preferredTransform)
+                let transformed = CGRect(origin: .zero, size: size).applying(transform).standardized.size
                 try Task.checkCancellation()
                 guard selected?.url == clip.url else { return }
+                videoPixelSize = transformed
                 duration = seconds
                 resetExportRange()
-                resolution = "\(Int(size.width)) × \(Int(size.height))"
+                resolution = "\(Int(transformed.width)) × \(Int(transformed.height))"
             } catch is CancellationError {} catch {
                 errorMessage = "Could not preview the recording: \(error.localizedDescription)"
             }
@@ -221,6 +227,7 @@ final class RecorderModel: ObservableObject {
         playbackState = nil
         playbackEnd = nil
         player = nil
+        videoPixelSize = .zero
         isPlaying = false
         playbackTime = 0
     }
