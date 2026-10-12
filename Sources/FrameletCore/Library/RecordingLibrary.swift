@@ -51,6 +51,42 @@ public enum RecordingLibrary {
             }
     }
 
+    /// A failed listing or unreadable file is not evidence that a session is empty.
+    public static func isEmptySession(_ session: URL) -> Bool {
+        guard
+            let files = try? FileManager.default.contentsOfDirectory(
+                at: session, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                options: [])
+        else { return false }
+        return files.allSatisfy { file in
+            guard file.pathExtension.lowercased() == "mp4",
+                let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                values.isRegularFile == true, let size = values.fileSize
+            else { return false }
+            return size == 0
+        }
+    }
+
+    /// Recovery consumes only the segments it joined; unrelated files in the session survive.
+    public static func removeRecoveredSegments(_ segments: [URL], in session: URL, library: URL) {
+        let parents = Set(sessionContainers(in: library).map { $0.standardizedFileURL.path })
+        guard parents.contains(session.standardizedFileURL.deletingLastPathComponent().path) else { return }
+        for segment in segments {
+            guard segment.standardizedFileURL.deletingLastPathComponent() == session.standardizedFileURL,
+                segment.pathExtension.lowercased() == "mp4"
+            else { continue }
+            try? FileManager.default.removeItem(at: segment)
+        }
+        removeEmptySession(session, in: library)
+    }
+
+    public static func removeEmptySession(_ session: URL, in library: URL) {
+        guard let remaining = try? FileManager.default.contentsOfDirectory(atPath: session.path),
+            remaining.isEmpty
+        else { return }
+        removeSession(session, in: library)
+    }
+
     /// Deletes one session folder and, once it is gone, the container that held it.
     /// Confined to `library` so a stray path cannot delete anything else.
     public static func removeSession(_ session: URL, in library: URL) {

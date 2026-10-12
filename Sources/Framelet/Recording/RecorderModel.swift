@@ -44,6 +44,7 @@ final class RecorderModel: ObservableObject {
     @Published var gifWidth = 960 {
         didSet { defaults.set(gifWidth, forKey: SettingsKey.gifWidth) }
     }
+    @Published private(set) var pauseIsChanging = false
     /// How long to wait after the region is confirmed before capture starts. Raise it to capture
     /// something that has to be opened by hand, such as a menu bar panel.
     @Published var countdownSeconds = 3 {
@@ -53,12 +54,14 @@ final class RecorderModel: ObservableObject {
     @Published var recordingTitle = "Region"
     @Published var gifStart = 0.0
     @Published var gifDuration = 10.0
+    @Published private(set) var recovering = false
     weak var mainWindow: NSWindow?
     var showWindow: (() -> Void)?
     var onPhaseChange: (() -> Void)?
     private var selector: RegionSelector?
     private var panel: RecordingPanel?
-    private var engine: CaptureEngine?
+    private var engine: RecordingCapturing?
+    private let engineFactory: @MainActor () -> RecordingCapturing
     private var countdownTask: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
     private var exportTask: Task<Void, Never>?
@@ -72,20 +75,20 @@ final class RecorderModel: ObservableObject {
     private var timer: Timer?
     private var clock = RecordingClock()
     private var region: CaptureRegion?
-    private var segments: [URL] = []
+    // Keep in-progress files out of the library until the encoder and validation have succeeded.
+    private var takeURL: URL?
     private var sessionDirectory: URL?
-    private enum FinishIntent { case pause, stop, restart }
-    private var finishIntent: FinishIntent = .stop
+    private var finalTakeURL: URL?
 
     var canControlRecording: Bool { phase == .recording || phase == .paused }
     var hasActiveRecording: Bool {
         switch phase {
-        case .starting, .recording, .pausing, .paused, .stopping, .restarting: return true
+        case .starting, .recording, .paused, .stopping, .restarting: return true
         default: return false
         }
     }
 
-    var busy: Bool { phase != .idle || exporting || choosingDestination }
+    var busy: Bool { phase != .idle || exporting || choosingDestination || recovering }
     var libraryURL: URL {
         if let libraryOverride { return libraryOverride }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -101,10 +104,12 @@ final class RecorderModel: ObservableObject {
         defaults: UserDefaults = .standard,
         trash: @escaping (URL) throws -> Void = {
             try FileManager.default.trashItem(at: $0, resultingItemURL: nil)
-        }
+        },
+        engineFactory: @escaping @MainActor () -> RecordingCapturing = { CaptureEngine() }
     ) {
         libraryOverride = libraryURL
         self.defaults = defaults
+        self.engineFactory = engineFactory
         trashFile = trash
         defaults.register(defaults: [
             SettingsKey.fps: 30,
@@ -119,7 +124,7 @@ final class RecorderModel: ObservableObject {
         showsCursor = defaults.bool(forKey: SettingsKey.showsCursor)
         gifFPS = min(30, max(1, defaults.integer(forKey: SettingsKey.gifFPS)))
         gifWidth = min(1920, max(64, defaults.integer(forKey: SettingsKey.gifWidth)))
-        countdownSeconds = max(1, defaults.integer(forKey: SettingsKey.countdownSeconds))
+        countdownSeconds = min(10, max(1, defaults.integer(forKey: SettingsKey.countdownSeconds)))
         reloadClips()
     }
 
@@ -253,7 +258,7 @@ final class RecorderModel: ObservableObject {
         case .recording, .paused: stopRecording()
         case .selecting: selector?.confirmHovered()
         case .countdown: cancelSelection()
-        case .starting, .pausing, .stopping, .restarting: break
+        case .starting, .stopping, .restarting: break
         }
     }
 
@@ -303,8 +308,10 @@ final class RecorderModel: ObservableObject {
         recordingTitle = region.title
         clock.reset()
         elapsed = 0
-        segments = []
-        sessionDirectory = RecordingLibrary.newSessionURL(in: libraryURL)
+        restartAfterSave = false
+        takeURL = nil
+        sessionDirectory = nil
+        finalTakeURL = nil
         let panel = RecordingPanel(model: self)
         self.panel = panel
         panel.show(near: region)
@@ -315,7 +322,7 @@ final class RecorderModel: ObservableObject {
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
             guard !Task.isCancelled else { return }
-            await startRecording(region)
+            await beginRecording(region: self.region ?? region)
         }
     }
 
@@ -338,143 +345,185 @@ final class RecorderModel: ObservableObject {
         return false
     }
 
-    private func startRecording(_ region: CaptureRegion) async {
+    func beginRecording(region: CaptureRegion) async {
+        guard !recovering, !exporting, !choosingDestination, phase == .idle || isCountingDown else { return }
+        clock.reset()
+        elapsed = 0
+        errorMessage = nil
+        notice = nil
+        self.region = region
+        recordingTitle = region.title
+        restartAfterSave = false
+        let session = RecordingLibrary.newSessionURL(in: libraryURL)
+        sessionDirectory = session
+        finalTakeURL = newRecordingURL()
+        takeURL = session.appendingPathComponent("take.mp4")
         setPhase(.starting)
-        let engine = CaptureEngine()
+        let engine = engineFactory()
         self.engine = engine
-        finishIntent = .stop
-        guard let directory = sessionDirectory else { return }
-        let url = directory.appendingPathComponent("segment-\(UUID().uuidString).mp4")
+        guard let url = takeURL else { return }
         engine.onStarted = { [weak self, weak engine] in
             guard let self, self.engine === engine, self.phase == .starting else { return }
             self.clock.resume(at: ProcessInfo.processInfo.systemUptime)
             self.setPhase(.recording)
-            // Added in `.common` mode: `scheduledTimer` only runs in `.default`, so the reading
-            // would freeze while a menu is open or the user is dragging a slider.
-            let ticker = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.elapsed = self.clock.elapsed(at: ProcessInfo.processInfo.systemUptime)
-                }
-            }
-            RunLoop.main.add(ticker, forMode: .common)
-            self.timer = ticker
+            self.startTicker()
         }
         engine.onFinished = { [weak self, weak engine] result in
-            guard let self, self.engine === engine else { return }
-            Task { await self.segmentFinished(result) }
+            guard let self, let engine else { return }
+            Task {
+                guard self.engine === engine else { return }
+                await self.takeFinished(result)
+            }
         }
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try await engine.start(region: region, url: url, fps: fps, cursor: showsCursor)
+            try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+            try await engine.start(
+                region: region, url: url, fps: fps, cursor: showsCursor)
         } catch {
             guard self.engine === engine else { return }
-            await segmentFinished(.failure(error))
+            await takeFinished(.failure(error))
         }
     }
 
     func stopRecording() {
-        finishTake(intent: .stop)
+        guard canControlRecording else { return }
+        guard let activeEngine = engine else { return }
+        setPhase(.stopping)
+        Task { await activeEngine.stop() }
     }
 
     func togglePause() {
-        if phase == .recording {
-            finishTake(intent: .pause)
-        } else if phase == .paused, let region {
-            setPhase(.starting)
-            Task { await startRecording(region) }
-        }
-    }
-
-    func restartRecording() { finishTake(intent: .restart) }
-
-    private func finishTake(intent: FinishIntent) {
-        guard canControlRecording else { return }
+        guard canControlRecording, !pauseIsChanging, let activeEngine = engine else { return }
         let wasPaused = phase == .paused
-        // Pausing an already-paused take has nothing to stop and would strand the phase at
-        // .pausing. `togglePause` never asks for it; this keeps the function total anyway.
-        guard !(wasPaused && intent == .pause) else { return }
-        finishIntent = intent
-        // The clock is frozen by `segmentFinished`, not here: the encoder keeps writing until the
-        // stream actually stops, so stopping the count now would make the reading shorter than the
-        // file it describes.
-        setPhase(intent == .pause ? .pausing : intent == .restart ? .restarting : .stopping)
-        if wasPaused {
-            Task { await completeTake(restart: intent == .restart) }
-        } else {
-            Task { await engine?.stop() }
+        pauseIsChanging = true
+        Task {
+            if wasPaused { await activeEngine.resume() } else { await activeEngine.pause() }
+            guard self.engine === activeEngine else { return }
+            pauseIsChanging = false
+            guard canControlRecording else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            if wasPaused {
+                clock.resume(at: now)
+                startTicker()
+                setPhase(.recording)
+            } else {
+                clock.pause(at: now)
+                elapsed = clock.elapsed(at: now)
+                timer?.invalidate()
+                timer = nil
+                setPhase(.paused)
+            }
         }
     }
 
-    private func freezeClock() {
+    private func startTicker() {
+        timer?.invalidate()
+        let ticker = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.elapsed = self.clock.elapsed(at: ProcessInfo.processInfo.systemUptime)
+            }
+        }
+        RunLoop.main.add(ticker, forMode: .common)
+        timer = ticker
+    }
+
+    func restartRecording() {
+        guard canControlRecording else { return }
+        guard let activeEngine = engine else { return }
+        setPhase(.restarting)
+        // Stopping naturally flows into `takeFinished`, which starts the next countdown over the
+        // same region when the previous take was saved.
+        restartAfterSave = true
+        Task { await activeEngine.stop() }
+    }
+
+    private func takeFinished(_ result: Result<URL, Error>) async {
+        guard engine != nil else { return }
+        setPhase(.stopping)
+        engine = nil
         clock.pause(at: ProcessInfo.processInfo.systemUptime)
         elapsed = clock.elapsed(at: ProcessInfo.processInfo.systemUptime)
         timer?.invalidate()
         timer = nil
-    }
-
-    private func segmentFinished(_ result: Result<URL, Error>) async {
-        guard engine != nil else { return }
-        freezeClock()
-        engine = nil
+        pauseIsChanging = false
+        let restart = restartAfterSave
+        restartAfterSave = false
+        panel?.close()
+        panel = nil
         switch result {
         case .success(let url):
-            segments.append(url)
-            if finishIntent == .pause {
-                setPhase(.paused)
-            } else {
-                setPhase(finishIntent == .restart ? .restarting : .stopping)
-                await completeTake(restart: finishIntent == .restart)
+            do {
+                let saved = try await commitTake(url)
+                setPhase(.idle)
+                reloadClips(select: saved)
+                if restart, let region {
+                    notice = "Previous take saved"
+                    beginCountdown(region)
+                    return
+                }
+                notice = "Recording saved"
+            } catch {
+                setPhase(.idle)
+                errorMessage =
+                    "Could not save the recording: \(error.localizedDescription)\nThe take remains in the Unfinished folder."
             }
         case .failure(let error):
-            // Keep completed segments available after a window closes or resume fails.
-            let kept: Bool
-            if !segments.isEmpty {
-                setPhase(.paused)
-                kept = true
+            let interruption = error as? CaptureInterruptionError
+            reportCaptureFailure(interruption?.underlying ?? error, action: "Recording")
+            if let recovered = interruption?.recoveredURL {
+                do {
+                    let saved = try await commitTake(recovered)
+                    setPhase(.idle)
+                    reloadClips(select: saved)
+                    notice = "Recording interrupted; captured video saved"
+                } catch {
+                    setPhase(.idle)
+                    errorMessage =
+                        "The recording was interrupted. Its file remains in the Unfinished folder: \(error.localizedDescription)"
+                }
             } else {
-                panel?.close()
-                panel = nil
+                pruneEmptyTake()
                 setPhase(.idle)
-                kept = !discardSessionIfUnusable()
+                if sessionDirectory != nil {
+                    errorMessage =
+                        (errorMessage ?? "Recording interrupted.")
+                        + "\nThe non-empty take was kept in the Unfinished folder; it may not be playable."
+                }
             }
-            reportCaptureFailure(error, action: "Recording")
-            // Only promise the segments were kept when a folder with something in it survived.
-            if kept {
-                errorMessage =
-                    (errorMessage ?? "Recording was interrupted.")
-                    + "\nThe segments written so far are in the Unfinished folder inside the recordings folder."
-            }
-            showWindow?()
+        }
+        takeURL = nil
+        finalTakeURL = nil
+        sessionDirectory = nil
+        showWindow?()
+    }
+
+    private func commitTake(_ url: URL) async throws -> URL {
+        guard url.standardizedFileURL == takeURL?.standardizedFileURL else {
+            throw SessionAssemblyError.noVideo
+        }
+        let asset = AVURLAsset(url: url)
+        let length = try await asset.load(.duration)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        guard length.isNumeric, length.seconds > 0, !tracks.isEmpty
+        else { throw SessionAssemblyError.noVideo }
+        let destination = finalTakeURL ?? newRecordingURL()
+        try FileExport.commit(url, to: destination)
+        if let sessionDirectory { RecordingLibrary.removeEmptySession(sessionDirectory, in: libraryURL) }
+        takeURL = nil
+        sessionDirectory = nil
+        return destination
+    }
+
+    private func pruneEmptyTake() {
+        guard let sessionDirectory else { return }
+        if RecordingLibrary.isEmptySession(sessionDirectory) {
+            RecordingLibrary.removeSession(sessionDirectory, in: libraryURL)
+            self.sessionDirectory = nil
         }
     }
 
-    private func completeTake(restart: Bool) async {
-        let output = newRecordingURL()
-        do {
-            try await SessionAssembler.assemble(segments: segments, to: output)
-            // Remove only this session's intermediates, after the final video has been committed.
-            if let sessionDirectory { RecordingLibrary.removeSession(sessionDirectory, in: libraryURL) }
-            segments = []
-            panel?.close()
-            panel = nil
-            setPhase(.idle)
-            reloadClips(select: output)
-            if restart, let region {
-                notice = "Previous take saved"
-                mainWindow?.orderOut(nil)
-                beginCountdown(region)
-            } else {
-                notice = "Recording saved"
-                showWindow?()
-            }
-        } catch {
-            setPhase(.paused)
-            errorMessage =
-                "Could not join the recording: \(error.localizedDescription)\nThe segments were kept; press Stop to try again."
-            showWindow?()
-        }
-    }
+    private var restartAfterSave = false
 
     /// Names a new recording after the local time it was made. `Date.ISO8601FormatStyle` reports
     /// UTC, which put a filename eight hours away from the time the interface shows for the same
@@ -493,21 +542,11 @@ final class RecorderModel: ObservableObject {
 
     // MARK: - Unfinished takes
 
-    /// Drops a session folder that ended up holding nothing decodable, so a take that failed
-    /// before the encoder wrote a frame does not leave an invisible folder behind.
-    /// Returns whether a folder with usable segments is still on disk.
-    private func discardSessionIfUnusable() -> Bool {
-        guard let sessionDirectory else { return false }
-        guard RecordingLibrary.usableSegments(in: sessionDirectory).isEmpty else { return true }
-        RecordingLibrary.removeSession(sessionDirectory, in: libraryURL)
-        self.sessionDirectory = nil
-        return false
-    }
-
-    /// Joins takes that were interrupted before their segments were assembled — quitting the app
-    /// mid-recording, or a failure the user dismissed — into ordinary recordings. Otherwise those
-    /// segments stay on disk where nothing in the interface can reach them.
+    /// Finalizes decodable legacy segments without consuming non-empty files on a failed decode.
     func recoverUnfinishedSessions() async {
+        guard !busy else { return }
+        recovering = true
+        defer { recovering = false }
         let sessions = RecordingLibrary.unfinishedSessions(in: libraryURL)
         guard !sessions.isEmpty else {
             // Nothing to recover, but an earlier take may have left a container empty.
@@ -522,27 +561,29 @@ final class RecorderModel: ObservableObject {
             guard phase == .idle, !exporting else { return }
             let segments = RecordingLibrary.usableSegments(in: session)
             guard !segments.isEmpty else {
-                RecordingLibrary.removeSession(session, in: libraryURL)
-                discarded += 1
-                continue
-            }
-            do {
-                try await SessionAssembler.assemble(segments: segments, to: newRecordingURL())
-                RecordingLibrary.removeSession(session, in: libraryURL)
-                recovered += 1
-            } catch {
-                // Assembly never consumes its sources, so nothing is lost by leaving a session in
-                // place. Only a session with nothing decodable is safe to discard outright.
-                if let failure = error as? SessionAssemblyError, case .noVideo = failure {
+                if RecordingLibrary.isEmptySession(session) {
                     RecordingLibrary.removeSession(session, in: libraryURL)
                     discarded += 1
                 } else {
                     stranded += 1
                 }
+                continue
+            }
+            do {
+                try await SessionAssembler.assemble(segments: segments, to: newRecordingURL())
+                RecordingLibrary.removeRecoveredSegments(segments, in: session, library: libraryURL)
+                recovered += 1
+            } catch {
+                // Failure to decode is not evidence that all the session's files are worthless.
+                // Preserve them for inspection rather than silently deleting a partial recording.
+                stranded += 1
             }
         }
         guard recovered > 0 || stranded > 0 || discarded > 0 else { return }
-        if recovered > 0 { reloadClips() }
+        if recovered > 0 {
+            recovering = false
+            reloadClips()
+        }
         // A session that cannot be joined is retried on every launch, so say so once rather than
         // failing silently forever. Discarding is announced too, because the failure notice of an
         // interrupted take points at this folder and promises the segments were kept.

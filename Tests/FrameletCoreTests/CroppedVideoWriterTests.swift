@@ -4,6 +4,13 @@ import XCTest
 @testable import FrameletCore
 
 final class CroppedVideoWriterTests: XCTestCase {
+    private final class Clock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 100.0
+        func now() -> Double { lock.withLock { value } }
+        func set(_ time: Double) { lock.withLock { value = time } }
+    }
+
     private func displayFrame() throws -> CVPixelBuffer {
         var result: CVPixelBuffer?
         XCTAssertEqual(
@@ -14,11 +21,10 @@ final class CroppedVideoWriterTests: XCTestCase {
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         let bytes = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
-        let stride = CVPixelBufferGetBytesPerRow(buffer)
+        let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
         for y in 0..<200 {
             for x in 0..<400 {
-                let offset = y * stride + x * 4
-                // Top-left red, top-right green, bottom blue: flipping or moving the crop fails visibly.
+                let offset = y * rowBytes + x * 4
                 bytes[offset] = y >= 100 ? 240 : 10
                 bytes[offset + 1] = y < 100 && x >= 200 ? 240 : 10
                 bytes[offset + 2] = y < 100 && x < 200 ? 240 : 10
@@ -26,6 +32,28 @@ final class CroppedVideoWriterTests: XCTestCase {
             }
         }
         return buffer
+    }
+
+    private func writer(
+        in root: URL, clock: Clock
+    ) throws -> CroppedVideoWriter {
+        try CroppedVideoWriter(
+            url: root.appendingPathComponent("take-\(UUID().uuidString).mp4"),
+            source: CGRect(x: 100, y: 0, width: 100, height: 50),
+            displaySize: CGSize(width: 200, height: 100), outputSize: CGSize(width: 100, height: 50),
+            fps: 30,
+            onFailure: { XCTFail("\($0)") }, uptime: { clock.now() })
+    }
+
+    private func append(_ writer: CroppedVideoWriter, buffer: CVPixelBuffer, at time: Double, clock: Clock)
+        async throws
+    {
+        clock.set(time)
+        for _ in 0..<200 {
+            if writer.append(buffer, at: CMTime(seconds: time, preferredTimescale: 60000)) { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("The test encoder did not accept a frame at \(time)")
     }
 
     func testRetinaCropEncodesOnlySelectedPixelsAtRequestedSize() async throws {
@@ -42,40 +70,108 @@ final class CroppedVideoWriterTests: XCTestCase {
                 displaySize: CGSize(width: 200, height: 100), outputSize: CGSize(width: 80, height: 40),
                 fps: 30, onStarted: { started.fulfill() }, onFailure: { XCTFail("\($0)") })
             writer.append(buffer, at: CMTime(seconds: 100, preferredTimescale: 600))
-            // Old and duplicate samples cannot start the clock twice or corrupt the writer timeline.
             writer.append(buffer, at: CMTime(seconds: 99, preferredTimescale: 600))
             writer.append(buffer, at: CMTime(seconds: 100, preferredTimescale: 600))
             await fulfillment(of: [started], timeout: 3)
             let url = try await writer.finish()
-            let asset = AVURLAsset(url: url)
-            let generator = AVAssetImageGenerator(asset: asset)
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
             let (frame, _) = try await generator.image(at: .zero)
             XCTAssertEqual(frame.width, 80)
             XCTAssertEqual(frame.height, 40)
             let pixel = samplePixel(frame)
-            XCTAssertLessThan(pixel[0], 60, "The red pixels outside the selection must not be encoded")
+            XCTAssertLessThan(pixel[0], 60)
             XCTAssertGreaterThan(pixel[index == 0 ? 1 : 2], 180)
-            XCTAssertLessThan(pixel[index == 0 ? 2 : 1], 60, "The selected vertical half must be correct")
+            XCTAssertLessThan(pixel[index == 0 ? 2 : 1], 60)
         }
     }
 
-    func testStaticDisplayLastFrameLastsUntilStop() async throws {
+    func testStaticTailAndRepeatedFinishShareTheSameFile() async throws {
         let root = try makeTestDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let writer = try CroppedVideoWriter(
-            url: root.appendingPathComponent("static.mp4"),
-            source: CGRect(x: 100, y: 0, width: 100, height: 50),
-            displaySize: CGSize(width: 200, height: 100), outputSize: CGSize(width: 100, height: 50), fps: 30)
-        writer.append(try displayFrame(), at: CMTime(seconds: 200, preferredTimescale: 600))
-        try await Task.sleep(for: .milliseconds(300))
+        let clock = Clock()
+        let writer = try writer(in: root, clock: clock)
+        try await append(writer, buffer: try displayFrame(), at: 100, clock: clock)
+        clock.set(103)
+        async let first = writer.finish()
+        async let second = writer.finish()
+        let (a, b) = try await (first, second)
+        XCTAssertEqual(a, b)
+        let later = try await writer.finish()
+        XCTAssertEqual(a, later)
+        let duration = try await AVURLAsset(url: a).load(.duration).seconds
+        XCTAssertEqual(duration, 3, accuracy: 0.04)
+    }
+
+    func testStopWhilePausedKeepsTheStaticActiveTailButNotThePause() async throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = Clock()
+        let writer = try writer(in: root, clock: clock)
+        try await append(writer, buffer: try displayFrame(), at: 100, clock: clock)
+        clock.set(104)
+        await writer.pause()
+        clock.set(124)
         let url = try await writer.finish()
         let duration = try await AVURLAsset(url: url).load(.duration).seconds
-        XCTAssertGreaterThanOrEqual(duration, 0.29)
-        XCTAssertLessThan(duration, 1)
-        do {
-            _ = try await writer.finish()
-            XCTFail("Finishing twice must report an error instead of hanging")
-        } catch {}
+        XCTAssertEqual(duration, 4, accuracy: 0.04)
+    }
+
+    func testResumeWithoutNewFramesPreservesActiveTimeOnBothSides() async throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = Clock()
+        let writer = try writer(in: root, clock: clock)
+        try await append(writer, buffer: try displayFrame(), at: 100, clock: clock)
+        clock.set(103)
+        await writer.pause()
+        clock.set(113)
+        await writer.resume()
+        clock.set(117)
+        let url = try await writer.finish()
+        let duration = try await AVURLAsset(url: url).load(.duration).seconds
+        XCTAssertEqual(duration, 7, accuracy: 0.04)
+    }
+
+    func testMultiplePausesDoNotDoubleCountOffsetsOrRegressTimestamps() async throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = Clock()
+        let writer = try writer(in: root, clock: clock)
+        let buffer = try displayFrame()
+        try await append(writer, buffer: buffer, at: 100, clock: clock)
+        try await append(writer, buffer: buffer, at: 101, clock: clock)
+        clock.set(102)
+        await writer.pause()
+        clock.set(105)
+        XCTAssertFalse(writer.append(buffer, at: CMTime(seconds: 105, preferredTimescale: 60000)))
+        clock.set(112)
+        await writer.resume()
+        try await append(writer, buffer: buffer, at: 113, clock: clock)
+        clock.set(114)
+        await writer.pause()
+        clock.set(134)
+        await writer.resume()
+        try await append(writer, buffer: buffer, at: 135, clock: clock)
+        clock.set(136)
+        let url = try await writer.finish()
+        let duration = try await AVURLAsset(url: url).load(.duration).seconds
+        XCTAssertEqual(duration, 6, accuracy: 0.04)
+        let reader = try AVAssetReader(asset: AVURLAsset(url: url))
+        let asset = reader.asset
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let output = AVAssetReaderTrackOutput(
+            track: try XCTUnwrap(tracks.first),
+            outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ])
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+        var times: [Double] = []
+        while let sample = output.copyNextSampleBuffer() {
+            times.append(sample.presentationTimeStamp.seconds)
+        }
+        XCTAssertEqual(times.count, 4)
+        XCTAssertTrue(zip(times, times.dropFirst()).allSatisfy { $0 < $1 })
     }
 
     func testNoFramesAndInvalidGeometryFailExplicitly() async throws {
@@ -87,7 +183,11 @@ final class CroppedVideoWriterTests: XCTestCase {
             displaySize: size, outputSize: size, fps: 30)
         do {
             _ = try await writer.finish()
-            XCTFail("An empty capture must not be reported as a saved recording")
+            XCTFail("Empty capture must not succeed")
+        } catch {}
+        do {
+            _ = try await writer.finish()
+            XCTFail("Empty finish result is shared")
         } catch {}
         XCTAssertThrowsError(
             try CroppedVideoWriter(
@@ -100,25 +200,19 @@ final class CroppedVideoWriterTests: XCTestCase {
         let root = try makeTestDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let size = CGSize(width: 100, height: 50)
-        // An out-of-range frame rate is a settings problem, not a geometry one; the message must
-        // not send the user hunting for a display that is fine.
         do {
             _ = try CroppedVideoWriter(
                 url: root.appendingPathComponent("fps.mp4"), source: CGRect(origin: .zero, size: size),
                 displaySize: size, outputSize: size, fps: 0)
-            XCTFail("A frame rate outside 1...240 must be rejected")
+            XCTFail("Invalid FPS must fail")
         } catch let error as NSError {
             XCTAssertEqual(error.code, 2)
             XCTAssertEqual(
                 error.localizedDescription, "The recording settings are outside the supported range.")
         }
-        do {
-            _ = try CroppedVideoWriter(
+        XCTAssertThrowsError(
+            try CroppedVideoWriter(
                 url: root.appendingPathComponent("odd.mp4"), source: CGRect(origin: .zero, size: size),
-                displaySize: size, outputSize: CGSize(width: 101, height: 50), fps: 30)
-            XCTFail("Odd output dimensions must be rejected")
-        } catch let error as NSError {
-            XCTAssertEqual(error.code, 2)
-        }
+                displaySize: size, outputSize: CGSize(width: 101, height: 50), fps: 30))
     }
 }

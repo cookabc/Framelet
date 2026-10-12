@@ -124,7 +124,6 @@ private struct RecordingHUD: View {
         switch model.phase {
         case .countdown(let value): return "Recording in \(value)"
         case .starting: return "Starting…"
-        case .pausing: return "Pausing…"
         case .paused: return "Paused  \(model.formattedElapsed)"
         case .stopping: return "Saving…"
         case .restarting: return "Saving, then restarting…"

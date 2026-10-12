@@ -14,20 +14,33 @@ struct CaptureRegion {
     }
 }
 
+struct CaptureInterruptionError: LocalizedError {
+    let recoveredURL: URL?
+    let underlying: Error
+    var errorDescription: String? { underlying.localizedDescription }
+}
+
 @MainActor
-final class CaptureEngine: NSObject, SCStreamDelegate, SCRecordingOutputDelegate {
+final class CaptureEngine: NSObject, SCStreamDelegate {
     private var stream: SCStream?
-    private var output: SCRecordingOutput?
-    private var regionOutput: RegionStreamOutput?
-    private var url: URL?
+    private var output: RegionStreamOutput?
     private var completed = false
+    private var requestedStart = false
+    private var finalization: Task<Void, Never>?
+    private var interruption: Error?
     var onStarted: (() -> Void)?
     var onFinished: ((Result<URL, Error>) -> Void)?
 
-    func start(region: CaptureRegion, url: URL, fps: Int, cursor: Bool) async throws {
+    func start(
+        region: CaptureRegion, url: URL, fps: Int, cursor: Bool
+    ) async throws {
+        guard !requestedStart else { throw Self.error("This capture has already been started.") }
+        requestedStart = true
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         let config = SCStreamConfiguration()
         let filter: SCContentFilter
+        let source: CGRect
+        let surfaceSize: CGSize
         let size = CaptureGeometry.pixelSize(
             points: region.rect.size, scale: region.screen.backingScaleFactor)
         config.width = Int(size.width)
@@ -38,17 +51,14 @@ final class CaptureEngine: NSObject, SCStreamDelegate, SCRecordingOutputDelegate
                     $0.windowID == windowID && $0.owningApplication?.processID == region.ownerPID
                 })
             else {
-                throw NSError(
-                    domain: "Framelet", code: 3,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "The selected window closed. Stop to save what was recorded, or choose another window."
-                    ])
+                throw Self.error("The selected window closed. Choose another window.")
             }
             filter = SCContentFilter(desktopIndependentWindow: window)
             config.ignoreShadowsSingleWindow = true
             config.scalesToFit = true
             config.preservesAspectRatio = true
+            source = CGRect(origin: .zero, size: region.rect.size)
+            surfaceSize = region.rect.size
         } else {
             guard
                 let screen = NSScreen.screens.first(where: {
@@ -56,116 +66,99 @@ final class CaptureEngine: NSObject, SCStreamDelegate, SCRecordingOutputDelegate
                         == region.displayID
                 }), screen.frame == region.screen.frame,
                 let display = content.displays.first(where: { $0.displayID == region.displayID }),
-                let source = CaptureGeometry.sourceRect(selection: region.rect, screen: screen.frame)
-            else {
-                throw NSError(
-                    domain: "Framelet", code: 1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "That display is gone or its layout changed. Select the area again."
-                    ])
-            }
+                let crop = CaptureGeometry.sourceRect(selection: region.rect, screen: screen.frame),
+                crop.size == region.rect.size
+            else { throw Self.error("That display is gone or its layout changed. Select the area again.") }
             let ownApps = content.applications.filter {
                 $0.processID == ProcessInfo.processInfo.processIdentifier
             }
             filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
-            // Keep popup composition independent of the selection bounds: crop composed frames
-            // ourselves instead of asking WindowServer to render a partial display sourceRect.
-            // Only cropped buffers reach the encoder; full-display frames remain in memory.
+            // Cropping after display composition keeps transient popup content independent of
+            // the selection edges. Only cropped buffers reach the encoder.
             config.width = Int(screen.frame.width * screen.backingScaleFactor)
             config.height = Int(screen.frame.height * screen.backingScaleFactor)
-            let writer = try CroppedVideoWriter(
-                url: url, source: source, displaySize: screen.frame.size, outputSize: size, fps: fps,
-                onStarted: { [weak self] in
-                    Task { @MainActor in
-                        guard let self, !self.completed else { return }
-                        self.onStarted?()
-                    }
-                },
-                onFailure: { [weak self] error in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        let stream = self.stream
-                        self.finish(.failure(error))
-                        try? await stream?.stopCapture()
-                    }
-                })
-            regionOutput = RegionStreamOutput(writer: writer)
+            source = crop
+            surfaceSize = screen.frame.size
         }
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
-        config.queueDepth = region.windowID == nil ? 3 : 5
+        config.queueDepth = 3
+        config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = cursor
         config.capturesAudio = false
-        config.excludesCurrentProcessAudio = true
-        config.sampleRate = 48000
-        config.channelCount = 2
+        let writer = try CroppedVideoWriter(
+            url: url, source: source, displaySize: surfaceSize, outputSize: size, fps: fps,
+            onStarted: { [weak self] in
+                Task { @MainActor in
+                    guard let self, !self.completed, self.finalization == nil else { return }
+                    self.onStarted?()
+                }
+            },
+            onFailure: { [weak self] error in
+                Task { @MainActor in await self?.finalize(interruptedBy: error) }
+            })
+        let output = RegionStreamOutput(
+            writer: writer, region: region.windowID == nil ? region : nil, fps: fps)
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
+        self.output = output
         self.stream = stream
-        self.url = url
         do {
-            if let regionOutput {
-                try stream.addStreamOutput(
-                    regionOutput, type: .screen, sampleHandlerQueue: regionOutput.queue)
-            } else {
-                let recordingConfig = SCRecordingOutputConfiguration()
-                recordingConfig.outputURL = url
-                recordingConfig.videoCodecType = .h264
-                recordingConfig.outputFileType = .mp4
-                let output = SCRecordingOutput(configuration: recordingConfig, delegate: self)
-                self.output = output
-                try stream.addRecordingOutput(output)
-            }
+            try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
             try await stream.startCapture()
         } catch {
-            completed = true
-            regionOutput?.writer.cancel()
-            regionOutput = nil
-            self.stream = nil
-            self.output = nil
-            throw error
+            // Once a writer exists, finalization is reported through onFinished so a partial,
+            // completed file and its original failure travel together to the library.
+            await finalize(interruptedBy: error)
         }
     }
 
-    func stop() async {
-        do {
-            try await stream?.stopCapture()
-            if let regionOutput { finish(.success(try await regionOutput.finish())) }
-        } catch { finish(.failure(error)) }
-    }
+    func pause() async { await output?.writer.pause() }
+    func resume() async { await output?.writer.resume() }
 
-    private func finish(_ result: Result<URL, Error>) {
+    func stop() async { await finalize() }
+
+    private func finalize(interruptedBy error: Error? = nil, alreadyStopped: Bool = false) async {
         guard !completed else { return }
-        completed = true
-        if case .failure = result { regionOutput?.writer.cancel() }
-        regionOutput = nil
-        stream = nil
-        output = nil
-        onFinished?(result)
-    }
-
-    nonisolated func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
-        Task { @MainActor in
-            guard !self.completed else { return }
-            self.onStarted?()
+        if let error, interruption == nil { interruption = error }
+        if let finalization {
+            await finalization.value
+            return
         }
-    }
-
-    nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
-        Task { @MainActor in
-            guard let url = self.url else { return }
-            self.finish(.success(url))
+        let activeStream = stream
+        let activeOutput = output
+        let task = Task { @MainActor [self] in
+            if !alreadyStopped {
+                do { try await activeStream?.stopCapture() } catch {
+                    if interruption == nil { interruption = error }
+                }
+            }
+            let result: Result<URL, Error>
+            do {
+                guard let activeOutput else { throw Self.error("The capture did not produce a recording.") }
+                let url = try await activeOutput.finish()
+                if let interruption {
+                    result = .failure(CaptureInterruptionError(recoveredURL: url, underlying: interruption))
+                } else {
+                    result = .success(url)
+                }
+            } catch {
+                result = .failure(
+                    CaptureInterruptionError(recoveredURL: nil, underlying: interruption ?? error))
+            }
+            completed = true
+            stream = nil
+            output = nil
+            onFinished?(result)
         }
-    }
-
-    nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
-        Task { @MainActor in
-            let activeStream = self.stream
-            self.finish(.failure(error))
-            try? await activeStream?.stopCapture()
-        }
+        finalization = task
+        await task.value
+        finalization = nil
     }
 
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
-        Task { @MainActor in self.finish(.failure(error)) }
+        Task { @MainActor in await self.finalize(interruptedBy: error, alreadyStopped: true) }
+    }
+
+    private static func error(_ message: String) -> NSError {
+        NSError(domain: "Framelet.Capture", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 }

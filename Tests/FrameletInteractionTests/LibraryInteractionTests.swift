@@ -166,7 +166,6 @@ final class LibraryInteractionTests: XCTestCase {
         let junkSession = RecordingLibrary.newSessionURL(in: library)
         try FileManager.default.createDirectory(at: junkSession, withIntermediateDirectories: true)
         try Data().write(to: junkSession.appendingPathComponent("empty.mp4"))
-        try Data([1]).write(to: junkSession.appendingPathComponent("notes.txt"))
 
         // A session whose segments cannot be joined stays on disk for the next launch.
         let stuckSession = RecordingLibrary.newSessionURL(in: library)

@@ -152,7 +152,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch model.phase {
         case .recording: title = "Stop Recording  \(model.formattedElapsed)"
         case .paused: title = "Stop and Save  \(model.formattedElapsed)"
-        case .pausing: title = "Pausing…"
         case .restarting: title = "Saving, then restarting…"
         case .selecting: title = "Cancel Selection"
         case .countdown: title = "Cancel Recording"
