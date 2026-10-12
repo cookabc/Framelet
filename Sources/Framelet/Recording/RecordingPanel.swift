@@ -117,9 +117,13 @@ final class RecordingPanel {
                 x: min(max(proposed.minX, frame.minX), frame.maxX - original.width),
                 y: min(max(proposed.minY, frame.minY), frame.maxY - original.height)),
             size: original.size)
-        guard model.moveRegion(to: rect) else { return false }
-        regionRect = rect
-        border?.setFrame(rect.insetBy(dx: -2, dy: -2), display: true)
+        guard
+            let aligned = CaptureGeometry.alignedMovement(
+                rect, screen: frame, scale: screen.backingScaleFactor),
+            model.moveRegion(to: aligned)
+        else { return false }
+        regionRect = aligned
+        border?.setFrame(aligned.insetBy(dx: -2, dy: -2), display: true)
         return true
     }
 

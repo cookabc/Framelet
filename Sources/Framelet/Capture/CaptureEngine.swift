@@ -67,7 +67,9 @@ final class CaptureEngine: NSObject, SCStreamDelegate {
                         == region.displayID
                 }), screen.frame == region.screen.frame,
                 let display = content.displays.first(where: { $0.displayID == region.displayID }),
-                let crop = CaptureGeometry.sourceRect(selection: region.rect, screen: screen.frame),
+                let crop = CaptureGeometry.sourceRect(
+                    selection: region.rect, screen: screen.frame,
+                    minimumDimension: 2 / screen.backingScaleFactor),
                 crop.size == region.rect.size
             else { throw Self.error("That display is gone or its layout changed. Select the area again.") }
             let ownApps = content.applications.filter {
@@ -81,6 +83,7 @@ final class CaptureEngine: NSObject, SCStreamDelegate {
             source = crop
             surfaceSize = screen.frame.size
         }
+        config.captureResolution = .best
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = 3
         config.pixelFormat = kCVPixelFormatType_32BGRA
@@ -124,7 +127,9 @@ final class CaptureEngine: NSObject, SCStreamDelegate {
         guard !completed, finalization == nil, let output, let region = output.region,
             rect.size == region.rect.size, region.screen.frame.contains(rect),
             NSScreen.screens.contains(where: { $0.frame == region.screen.frame }),
-            let source = CaptureGeometry.sourceRect(selection: rect, screen: region.screen.frame)
+            let source = CaptureGeometry.sourceRect(
+                selection: rect, screen: region.screen.frame,
+                minimumDimension: 2 / region.screen.backingScaleFactor)
         else { return false }
         return output.writer.updateCrop(to: source)
     }

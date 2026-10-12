@@ -267,6 +267,30 @@ final class RecorderLifecycleTests: XCTestCase {
         try await finish(capture, model: model, result: .failure(CocoaError(.fileWriteUnknown)))
     }
 
+    func testFractionalSmallAreaAlignsBeforeCaptureAndMovement() async throws {
+        let (model, capture, area, _) = try fixture()
+        let fractional = CaptureRegion(
+            screen: area.screen,
+            rect: CGRect(x: area.rect.minX + 0.24, y: area.rect.minY + 0.24, width: 101.7, height: 51.9))
+        await model.beginRecording(region: fractional)
+        let selected = try XCTUnwrap(capture.region)
+        XCTAssertTrue(fractional.rect.contains(selected.rect))
+        let scale = area.screen.backingScaleFactor
+        XCTAssertEqual(Int((selected.rect.width * scale).rounded()) % 2, 0)
+        XCTAssertEqual(Int((selected.rect.height * scale).rounded()) % 2, 0)
+        let moved = selected.rect.offsetBy(dx: 0.24, dy: 0.24)
+        XCTAssertTrue(model.moveRegion(to: moved))
+        let accepted = try XCTUnwrap(capture.acceptedMoves.last)
+        XCTAssertEqual(accepted.size, selected.rect.size)
+        XCTAssertEqual(
+            ((accepted.minX - area.screen.frame.minX) * scale).rounded(),
+            (accepted.minX - area.screen.frame.minX) * scale, accuracy: 0.001)
+        XCTAssertEqual(
+            ((area.screen.frame.maxY - accepted.maxY) * scale).rounded(),
+            (area.screen.frame.maxY - accepted.maxY) * scale, accuracy: 0.001)
+        try await finish(capture, model: model, result: .failure(CocoaError(.fileWriteUnknown)))
+    }
+
     func testWindowTakeDoesNotOfferFixedAreaAnnotationOrMove() async throws {
         let (model, capture, area, _) = try fixture()
         let window = CaptureRegion(

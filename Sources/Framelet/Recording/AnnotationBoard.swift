@@ -20,7 +20,7 @@ final class AnnotationBoard {
 
     func show(over rect: CGRect) {
         close()
-        guard rect.width >= 24, rect.height >= 24, !rect.isInfinite, !rect.isNull else { return }
+        guard rect.width >= 2, rect.height >= 2, !rect.isInfinite, !rect.isNull else { return }
         let window = AnnotationPanel(
             contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
             defer: false)
@@ -79,7 +79,7 @@ final class AnnotationBoard {
     }
 
     func move(to rect: CGRect) {
-        guard isActive, rect.width >= 24, rect.height >= 24, !rect.isInfinite, !rect.isNull else { return }
+        guard isActive, rect.width >= 2, rect.height >= 2, !rect.isInfinite, !rect.isNull else { return }
         // Do not connect a stroke begun in the old surface to a point in the new surface.
         view?.finishStroke()
         window?.setFrame(rect, display: true)

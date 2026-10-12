@@ -45,12 +45,53 @@ public struct CaptureProjection: Equatable {
 
 public enum CaptureGeometry {
     /// AppKit uses a bottom-left origin; ScreenCaptureKit expects display-local top-left points.
-    public static func sourceRect(selection: CGRect, screen: CGRect) -> CGRect? {
+    public static func sourceRect(selection: CGRect, screen: CGRect, minimumDimension: CGFloat = 24)
+        -> CGRect?
+    {
         let clipped = selection.standardized.intersection(screen)
-        guard !clipped.isNull, clipped.width >= 24, clipped.height >= 24 else { return nil }
+        guard minimumDimension.isFinite, minimumDimension > 0,
+            !clipped.isNull, clipped.width >= minimumDimension, clipped.height >= minimumDimension
+        else { return nil }
         return CGRect(
             x: clipped.minX - screen.minX, y: screen.maxY - clipped.maxY,
             width: clipped.width, height: clipped.height)
+    }
+
+    /// Align inward so no pixels outside the selection are encoded. Keeping even pixel dimensions
+    /// avoids shrinking an odd-width crop by a fraction and resampling every text edge.
+    public static func alignedSourceRect(_ source: CGRect, scale: CGFloat) -> CGRect? {
+        guard scale.isFinite, scale > 0,
+            [source.minX, source.minY, source.width, source.height].allSatisfy({ $0.isFinite }),
+            source.width > 0, source.height > 0
+        else { return nil }
+        let x = ceil(source.minX * scale)
+        let y = ceil(source.minY * scale)
+        let width = floor((floor(source.maxX * scale) - x) / 2) * 2
+        let height = floor((floor(source.maxY * scale) - y) / 2) * 2
+        guard width >= 2, height >= 2 else { return nil }
+        return CGRect(x: x / scale, y: y / scale, width: width / scale, height: height / scale)
+    }
+
+    public static func alignedSelection(_ selection: CGRect, screen: CGRect, scale: CGFloat) -> CGRect? {
+        guard
+            let source = sourceRect(
+                selection: selection, screen: screen, minimumDimension: 2 / max(1, scale)),
+            let aligned = alignedSourceRect(source, scale: scale)
+        else { return nil }
+        return CGRect(
+            x: screen.minX + aligned.minX, y: screen.maxY - aligned.maxY,
+            width: aligned.width, height: aligned.height)
+    }
+
+    /// Movement keeps the take's locked size; only its origin snaps to the screen's pixel grid.
+    public static func alignedMovement(_ selection: CGRect, screen: CGRect, scale: CGFloat) -> CGRect? {
+        guard scale.isFinite, scale > 0, screen.contains(selection),
+            [selection.minX, selection.minY, selection.width, selection.height].allSatisfy({ $0.isFinite })
+        else { return nil }
+        let x = screen.minX + ((selection.minX - screen.minX) * scale).rounded() / scale
+        let top = screen.maxY - ((screen.maxY - selection.maxY) * scale).rounded() / scale
+        let rect = CGRect(x: x, y: top - selection.height, width: selection.width, height: selection.height)
+        return screen.contains(rect) ? rect : nil
     }
 
     public static func pixelSize(points: CGSize, scale: CGFloat, maxDimension: CGFloat = 3840) -> CGSize {

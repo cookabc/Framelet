@@ -332,7 +332,8 @@ final class RecorderModel: ObservableObject {
         }
     }
 
-    private func beginCountdown(_ region: CaptureRegion) {
+    private func beginCountdown(_ selection: CaptureRegion) {
+        let region = alignedRegion(selection)
         // Leave time to arrange the target or reopen transient content if its owner dismissed it.
         let seconds = max(1, countdownSeconds)
         self.region = region
@@ -376,8 +377,18 @@ final class RecorderModel: ObservableObject {
         return false
     }
 
-    func beginRecording(region: CaptureRegion) async {
+    private func alignedRegion(_ selection: CaptureRegion) -> CaptureRegion {
+        guard selection.windowID == nil,
+            let rect = CaptureGeometry.alignedSelection(
+                selection.rect, screen: selection.screen.frame,
+                scale: selection.screen.backingScaleFactor)
+        else { return selection }
+        return CaptureRegion(screen: selection.screen, rect: rect, title: selection.title)
+    }
+
+    func beginRecording(region selection: CaptureRegion) async {
         guard !recovering, !exporting, !choosingDestination, phase == .idle || isCountingDown else { return }
+        let region = alignedRegion(selection)
         clock.reset()
         elapsed = 0
         errorMessage = nil
@@ -557,10 +568,12 @@ final class RecorderModel: ObservableObject {
     func moveRegion(to appKitRect: CGRect) -> Bool {
         guard canMoveRegion, let current = region,
             appKitRect.size == current.rect.size,
-            current.screen.frame.contains(appKitRect), engine?.moveRegion(to: appKitRect) == true
+            let rect = CaptureGeometry.alignedMovement(
+                appKitRect, screen: current.screen.frame,
+                scale: current.screen.backingScaleFactor), engine?.moveRegion(to: rect) == true
         else { return false }
-        region = CaptureRegion(screen: current.screen, rect: appKitRect, title: current.title)
-        board?.move(to: appKitRect)
+        region = CaptureRegion(screen: current.screen, rect: rect, title: current.title)
+        board?.move(to: rect)
         return true
     }
 
