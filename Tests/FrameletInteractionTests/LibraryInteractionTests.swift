@@ -80,6 +80,7 @@ final class LibraryInteractionTests: XCTestCase {
         let first = RecorderModel(libraryURL: root, defaults: defaults)
         XCTAssertEqual(first.fps, 30, "An untouched suite should start from the built-in defaults.")
         XCTAssertTrue(first.showsCursor)
+        XCTAssertFalse(first.showsClicks)
         XCTAssertEqual(first.gifFPS, 15)
         XCTAssertEqual(first.gifWidth, 960)
         XCTAssertEqual(first.countdownSeconds, 3)
@@ -87,6 +88,7 @@ final class LibraryInteractionTests: XCTestCase {
 
         first.fps = 60
         first.showsCursor = false
+        first.showsClicks = true
         first.gifFPS = 20
         first.gifWidth = 1280
         first.countdownSeconds = 10
@@ -95,6 +97,7 @@ final class LibraryInteractionTests: XCTestCase {
         let relaunched = RecorderModel(libraryURL: root, defaults: defaults)
         XCTAssertEqual(relaunched.fps, 60)
         XCTAssertFalse(relaunched.showsCursor)
+        XCTAssertTrue(relaunched.showsClicks)
         XCTAssertEqual(relaunched.gifFPS, 20)
         XCTAssertEqual(relaunched.gifWidth, 1280)
         XCTAssertEqual(relaunched.countdownSeconds, 10)

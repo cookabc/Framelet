@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 
 /// Recording options the user should not have to set again on every launch.
 private enum SettingsKey {
+    static let showsClicks = "showsClicks"
     static let codec = "recordingCodec"
     static let fps = "recordingFPS"
     static let showsCursor = "showsCursor"
@@ -47,6 +48,9 @@ final class RecorderModel: ObservableObject {
     }
     @Published var codec: VideoCodec = .h264 {
         didSet { defaults.set(codec.rawValue, forKey: SettingsKey.codec) }
+    }
+    @Published var showsClicks = false {
+        didSet { defaults.set(showsClicks, forKey: SettingsKey.showsClicks) }
     }
     @Published private(set) var pauseIsChanging = false
     /// How long to wait after the region is confirmed before capture starts. Raise it to capture
@@ -119,6 +123,7 @@ final class RecorderModel: ObservableObject {
             SettingsKey.codec: VideoCodec.h264.rawValue,
             SettingsKey.fps: 30,
             SettingsKey.showsCursor: true,
+            SettingsKey.showsClicks: false,
             SettingsKey.gifFPS: 15,
             SettingsKey.gifWidth: 960,
             SettingsKey.countdownSeconds: 3,
@@ -127,6 +132,7 @@ final class RecorderModel: ObservableObject {
         // so a hand-edited or stale default cannot reach them verbatim.
         fps = min(240, max(1, defaults.integer(forKey: SettingsKey.fps)))
         showsCursor = defaults.bool(forKey: SettingsKey.showsCursor)
+        showsClicks = defaults.bool(forKey: SettingsKey.showsClicks)
         codec = VideoCodec(rawValue: defaults.string(forKey: SettingsKey.codec) ?? "") ?? .h264
         gifFPS = min(30, max(1, defaults.integer(forKey: SettingsKey.gifFPS)))
         gifWidth = min(1920, max(64, defaults.integer(forKey: SettingsKey.gifWidth)))
@@ -384,7 +390,7 @@ final class RecorderModel: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
             try await engine.start(
-                region: region, url: url, fps: fps, cursor: showsCursor, codec: codec)
+                region: region, url: url, fps: fps, cursor: showsCursor, codec: codec, clicks: showsClicks)
         } catch {
             guard self.engine === engine else { return }
             await takeFinished(.failure(error))

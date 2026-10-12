@@ -32,7 +32,7 @@ final class CaptureEngine: NSObject, SCStreamDelegate {
     var onFinished: ((Result<URL, Error>) -> Void)?
 
     func start(
-        region: CaptureRegion, url: URL, fps: Int, cursor: Bool, codec: VideoCodec
+        region: CaptureRegion, url: URL, fps: Int, cursor: Bool, codec: VideoCodec, clicks: Bool = false
     ) async throws {
         guard !requestedStart else { throw Self.error("This capture has already been started.") }
         requestedStart = true
@@ -84,6 +84,8 @@ final class CaptureEngine: NSObject, SCStreamDelegate {
         config.queueDepth = 3
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = cursor
+        // ScreenCaptureKit's native click feedback requires BGRA, but no input-event tap.
+        config.showMouseClicks = clicks
         config.capturesAudio = false
         let writer = try CroppedVideoWriter(
             url: url, source: source, displaySize: surfaceSize, outputSize: size, fps: fps, codec: codec,

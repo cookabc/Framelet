@@ -18,7 +18,7 @@ private final class TestCapture: RecordingCapturing {
     var delaysPause = false
 
     func start(
-        region: CaptureRegion, url: URL, fps: Int, cursor: Bool, codec: VideoCodec
+        region: CaptureRegion, url: URL, fps: Int, cursor: Bool, codec: VideoCodec, clicks: Bool
     ) async throws {
         self.region = region
         self.url = url

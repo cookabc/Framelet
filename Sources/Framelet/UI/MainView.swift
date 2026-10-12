@@ -173,42 +173,52 @@ struct MainView: View {
     }
 
     private var captureSettings: some View {
-        HStack(spacing: 16) {
-            Toggle("Show cursor", isOn: $model.showsCursor).toggleStyle(.checkbox)
-                .padding(.vertical, 8).contentShape(Rectangle())
-            Spacer()
-            Menu {
-                Picker("Countdown", selection: $model.countdownSeconds) {
-                    Text("3 s").tag(3)
-                    Text("5 s").tag(5)
-                    Text("10 s").tag(10)
-                }.pickerStyle(.inline)
-            } label: {
-                Text("Countdown: \(model.countdownSeconds) s")
+        VStack(spacing: 6) {
+            HStack(spacing: 16) {
+                Toggle("Show cursor", isOn: $model.showsCursor).toggleStyle(.checkbox)
+                    .padding(.vertical, 8).contentShape(Rectangle())
+                Spacer()
+                Menu {
+                    Picker("Countdown", selection: $model.countdownSeconds) {
+                        Text("3 s").tag(3)
+                        Text("5 s").tag(5)
+                        Text("10 s").tag(10)
+                    }.pickerStyle(.inline)
+                } label: {
+                    Text("Countdown: \(model.countdownSeconds) s")
+                }
+                .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
+                Menu {
+                    Picker("Frame rate", selection: $model.fps) {
+                        Text("30 fps").tag(30)
+                        Text("60 fps").tag(60)
+                    }.pickerStyle(.inline)
+                } label: {
+                    Text("Recording: \(model.fps) fps")
+                }
+                .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
+                Menu {
+                    Picker("Codec", selection: $model.codec) {
+                        ForEach(VideoCodec.allCases, id: \.self) { codec in
+                            Text(codec.label).tag(codec)
+                        }
+                    }.pickerStyle(.inline)
+                    Text("HEVC can reduce file size; H.264 is more widely compatible")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                } label: {
+                    Text(model.codec.label)
+                }
+                .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
             }
-            .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
-            Menu {
-                Picker("Frame rate", selection: $model.fps) {
-                    Text("30 fps").tag(30)
-                    Text("60 fps").tag(60)
-                }.pickerStyle(.inline)
-            } label: {
-                Text("Recording: \(model.fps) fps")
-            }
-            .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
-            Menu {
-                Picker("Codec", selection: $model.codec) {
-                    ForEach(VideoCodec.allCases, id: \.self) { codec in
-                        Text(codec.label).tag(codec)
-                    }
-                }.pickerStyle(.inline)
-                Text("HEVC can reduce file size; H.264 is more widely compatible")
+            HStack(spacing: 18) {
+                Toggle("Highlight clicks", isOn: $model.showsClicks).toggleStyle(.checkbox)
+                    .help(
+                        "Show ScreenCaptureKit's native click feedback in the video. No keyboard monitoring.")
+                Spacer()
+                Text("Silent recording · no keyboard monitoring")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
-            } label: {
-                Text(model.codec.label)
-            }
-            .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
-        }.font(.system(size: 12)).frame(height: 40).disabled(model.busy)
+            }.font(.system(size: 12))
+        }.frame(height: 66).disabled(model.busy)
     }
 
     private var exportControls: some View {
