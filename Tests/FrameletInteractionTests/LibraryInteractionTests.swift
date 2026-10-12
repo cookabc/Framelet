@@ -81,6 +81,7 @@ final class LibraryInteractionTests: XCTestCase {
         XCTAssertEqual(first.fps, 30, "An untouched suite should start from the built-in defaults.")
         XCTAssertTrue(first.showsCursor)
         XCTAssertFalse(first.showsClicks)
+        XCTAssertTrue(first.gifDither)
         XCTAssertEqual(first.gifFPS, 15)
         XCTAssertEqual(first.gifWidth, 960)
         XCTAssertEqual(first.countdownSeconds, 3)
@@ -89,6 +90,7 @@ final class LibraryInteractionTests: XCTestCase {
         first.fps = 60
         first.showsCursor = false
         first.showsClicks = true
+        first.gifDither = false
         first.gifFPS = 20
         first.gifWidth = 1280
         first.countdownSeconds = 10
@@ -98,6 +100,7 @@ final class LibraryInteractionTests: XCTestCase {
         XCTAssertEqual(relaunched.fps, 60)
         XCTAssertFalse(relaunched.showsCursor)
         XCTAssertTrue(relaunched.showsClicks)
+        XCTAssertFalse(relaunched.gifDither)
         XCTAssertEqual(relaunched.gifFPS, 20)
         XCTAssertEqual(relaunched.gifWidth, 1280)
         XCTAssertEqual(relaunched.countdownSeconds, 10)

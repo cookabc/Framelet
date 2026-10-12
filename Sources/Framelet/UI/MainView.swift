@@ -264,6 +264,10 @@ struct MainView: View {
                         Text("15 fps").tag(15)
                         Text("20 fps").tag(20)
                     }.frame(width: 165)
+                    Toggle("Dither", isOn: $model.gifDither).toggleStyle(.checkbox)
+                        .help(
+                            "Smoother gradients, with extra noise and file size. Off keeps fills flat, not lossless."
+                        )
                     Spacer(minLength: 0)
                 }.disabled(model.busy).controlSize(.large)
             }

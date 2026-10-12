@@ -11,6 +11,7 @@ private enum SettingsKey {
     static let fps = "recordingFPS"
     static let showsCursor = "showsCursor"
     static let gifFPS = "gifFPS"
+    static let gifDither = "gifDither"
     static let gifWidth = "gifWidth"
     static let countdownSeconds = "countdownSeconds"
 }
@@ -49,6 +50,9 @@ final class RecorderModel: ObservableObject {
     }
     @Published var gifWidth = 960 {
         didSet { defaults.set(gifWidth, forKey: SettingsKey.gifWidth) }
+    }
+    @Published var gifDither = true {
+        didSet { defaults.set(gifDither, forKey: SettingsKey.gifDither) }
     }
     @Published var codec: VideoCodec = .h264 {
         didSet { defaults.set(codec.rawValue, forKey: SettingsKey.codec) }
@@ -131,6 +135,7 @@ final class RecorderModel: ObservableObject {
             SettingsKey.showsClicks: false,
             SettingsKey.gifFPS: 15,
             SettingsKey.gifWidth: 960,
+            SettingsKey.gifDither: true,
             SettingsKey.countdownSeconds: 3,
         ])
         // Stored values are clamped back into the ranges the capture and export paths accept,
@@ -141,6 +146,7 @@ final class RecorderModel: ObservableObject {
         codec = VideoCodec(rawValue: defaults.string(forKey: SettingsKey.codec) ?? "") ?? .h264
         gifFPS = min(30, max(1, defaults.integer(forKey: SettingsKey.gifFPS)))
         gifWidth = min(1920, max(64, defaults.integer(forKey: SettingsKey.gifWidth)))
+        gifDither = defaults.object(forKey: SettingsKey.gifDither) as? Bool ?? true
         countdownSeconds = min(10, max(1, defaults.integer(forKey: SettingsKey.countdownSeconds)))
         reloadClips()
     }
@@ -670,7 +676,7 @@ final class RecorderModel: ObservableObject {
         let start = exportStart
         let length = exportDuration
         let settings = GIFSettings(
-            start: start, duration: length, fps: gifFPS, maxWidth: gifWidth)
+            start: start, duration: length, fps: gifFPS, maxWidth: gifWidth, dither: gifDither)
         choosingDestination = true
         savePanel.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
