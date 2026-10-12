@@ -15,6 +15,10 @@ private enum SettingsKey {
     static let countdownSeconds = "countdownSeconds"
 }
 
+enum ClipExportFormat: String, CaseIterable {
+    case video, gif
+}
+
 @MainActor
 final class RecorderModel: ObservableObject {
     @Published var phase: RecordingPhase = .idle
@@ -60,8 +64,9 @@ final class RecorderModel: ObservableObject {
     }
     /// Per-clip: reset from the selected recording, so it is deliberately not remembered.
     @Published var recordingTitle = "Region"
-    @Published var gifStart = 0.0
-    @Published var gifDuration = 10.0
+    @Published var exportFormat: ClipExportFormat = .video
+    @Published private(set) var exportStart = 0.0
+    @Published private(set) var exportDuration = 0.0
     @Published private(set) var recovering = false
     weak var mainWindow: NSWindow?
     var showWindow: (() -> Void)?
@@ -172,7 +177,8 @@ final class RecorderModel: ObservableObject {
         lastExport = nil
         duration = 0
         resolution = ""
-        gifStart = 0
+        exportStart = 0
+        exportDuration = 0
         metadataTask = Task {
             do {
                 let asset = AVURLAsset(url: clip.url)
@@ -187,7 +193,7 @@ final class RecorderModel: ObservableObject {
                 try Task.checkCancellation()
                 guard selected?.url == clip.url else { return }
                 duration = seconds
-                gifDuration = min(10, seconds)
+                resetExportRange()
                 resolution = "\(Int(size.width)) × \(Int(size.height))"
             } catch is CancellationError {} catch {
                 errorMessage = "Could not preview the recording: \(error.localizedDescription)"
@@ -621,9 +627,38 @@ final class RecorderModel: ObservableObject {
 
     // MARK: - Export
 
-    func export(gif: Bool) {
-        guard !busy, let clip = selected, duration > 0 else { return }
+    var maxExportDuration: Double {
+        max(0, min(exportFormat == .gif ? 60 : duration, duration - exportStart))
+    }
+
+    func setExportFormat(_ format: ClipExportFormat) {
+        guard !busy else { return }
+        exportFormat = format
+        resetExportRange()
+    }
+
+    func resetExportRange() {
+        guard !busy else { return }
+        exportStart = 0
+        exportDuration = exportFormat == .gif ? min(10, duration) : duration
+    }
+
+    func setExportStart(_ value: Double) {
+        guard !busy else { return }
+        exportStart = value.isFinite ? min(max(0, value), max(0, duration - 0.1)) : 0
+        exportDuration = min(max(0.1, exportDuration), maxExportDuration)
+    }
+
+    func setExportDuration(_ value: Double) {
+        guard !busy else { return }
+        exportDuration =
+            value.isFinite ? min(max(0.1, value), maxExportDuration) : min(0.1, maxExportDuration)
+    }
+
+    func export() {
+        guard !busy, let clip = selected, duration >= 0.1, let window = mainWindow else { return }
         player?.pause()
+        let gif = exportFormat == .gif
         let savePanel = NSSavePanel()
         savePanel.allowedContentTypes = [gif ? .gif : .mpeg4Movie]
         savePanel.nameFieldStringValue = clip.exportName + (gif ? ".gif" : ".mp4")
@@ -631,8 +666,11 @@ final class RecorderModel: ObservableObject {
         savePanel.prompt = "Save"
         savePanel.nameFieldLabel = "File name:"
         savePanel.canCreateDirectories = true
-        guard let window = mainWindow else { return }
-        let settings = GIFSettings(start: gifStart, duration: gifDuration, fps: gifFPS, maxWidth: gifWidth)
+        let format = exportFormat
+        let start = exportStart
+        let length = exportDuration
+        let settings = GIFSettings(
+            start: start, duration: length, fps: gifFPS, maxWidth: gifWidth)
         choosingDestination = true
         savePanel.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
@@ -641,24 +679,23 @@ final class RecorderModel: ObservableObject {
             self.exporting = true
             self.exportProgress = 0
             self.notice = nil
+            self.lastExport = nil
             self.exportTask = Task { [weak self] in
                 guard let self else { return }
                 do {
-                    if gif {
+                    if format == .gif {
                         try await GIFExporter.export(video: clip.url, to: destination, settings: settings) {
                             [weak self] value in
-                            Task { @MainActor [weak self] in self?.exportProgress = value }
+                            Task { @MainActor [weak self] in
+                                guard self?.exporting == true else { return }
+                                self?.exportProgress = value
+                            }
                         }
                     } else {
-                        let copyTask = Task.detached {
-                            try FileExport.copyVideo(from: clip.url, to: destination)
-                        }
-                        try await withTaskCancellationHandler {
-                            try await copyTask.value
-                        } onCancel: {
-                            copyTask.cancel()
-                        }
+                        try await VideoExporter.export(
+                            video: clip.url, to: destination, start: start, duration: length)
                     }
+                    self.exportProgress = 1
                     lastExport = destination
                     notice = "Export complete"
                 } catch is CancellationError { notice = "Export cancelled" } catch {

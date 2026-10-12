@@ -190,4 +190,26 @@ final class RecorderLifecycleTests: XCTestCase {
         XCTAssertTrue(model.notice?.contains("could not be joined") == true)
     }
 
+    func testExportRangeDefaultsAndBoundsArePerClipAndFormat() async throws {
+        let (model, _, _, _) = try fixture()
+        model.duration = 120
+        model.resetExportRange()
+        XCTAssertEqual(model.exportStart, 0)
+        XCTAssertEqual(model.exportDuration, 120)
+        model.setExportStart(30)
+        XCTAssertEqual(model.exportDuration, 90)
+        model.setExportDuration(5)
+        XCTAssertEqual(model.exportDuration, 5)
+        model.setExportFormat(.gif)
+        XCTAssertEqual(model.exportDuration, 10)
+        XCTAssertEqual(model.maxExportDuration, 60)
+        model.setExportDuration(100)
+        XCTAssertEqual(model.exportDuration, 60)
+        model.setExportStart(119)
+        XCTAssertEqual(model.exportDuration, 1)
+        model.setExportStart(.nan)
+        XCTAssertEqual(model.exportStart, 0)
+        model.setExportFormat(.video)
+        XCTAssertEqual(model.exportDuration, 120)
+    }
 }

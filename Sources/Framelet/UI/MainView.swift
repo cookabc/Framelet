@@ -224,51 +224,73 @@ struct MainView: View {
     private var exportControls: some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
-                Text("Animated Image").fontWeight(.medium)
-                Spacer()
-                Picker("Long edge", selection: $model.gifWidth) {
-                    Text("640 px").tag(640)
-                    Text("960 px").tag(960)
-                    Text("1280 px").tag(1280)
-                }.frame(width: 175)
-                Picker("Frame rate", selection: $model.gifFPS) {
-                    Text("10 fps").tag(10)
-                    Text("15 fps").tag(15)
-                    Text("20 fps").tag(20)
-                }.frame(width: 165)
-            }.disabled(model.busy).controlSize(.large)
-            HStack(spacing: 14) {
-                rangeField("Start", value: $model.gifStart, range: 0...max(0, model.duration - 0.1))
-                rangeField("Duration", value: $model.gifDuration, range: 0.1...maxGIFDuration)
-                // Reports the limit that actually applies, not just the app's own 60 s cap: on an
-                // 11 s recording the field refuses anything above 11, so "Up to 60 s" misled.
-                Text("Up to \(Int(maxGIFDuration.rounded())) s").font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                Text("Export").fontWeight(.medium)
+                Picker(
+                    "Format",
+                    selection: Binding(
+                        get: { model.exportFormat }, set: { model.setExportFormat($0) }
+                    )
+                ) {
+                    Text("MP4 video").tag(ClipExportFormat.video)
+                    Text("Animated GIF").tag(ClipExportFormat.gif)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 230).accessibilityLabel("Export format")
+                Spacer(minLength: 0)
+                Button("Reset range") { model.resetExportRange() }
+                    .buttonStyle(RecorderButtonStyle(height: 32))
+            }.disabled(model.busy)
+            HStack(spacing: 10) {
+                rangeField(
+                    "Start",
+                    value: Binding(
+                        get: { model.exportStart }, set: { model.setExportStart($0) }
+                    ), range: 0...max(0, model.duration - 0.1))
+                rangeField(
+                    "Duration",
+                    value: Binding(
+                        get: { model.exportDuration }, set: { model.setExportDuration($0) }
+                    ), range: 0.1...max(0.1, model.maxExportDuration))
+                Text(model.exportFormat == .gif ? "GIF: up to 60 s" : "Original stays unchanged")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
             }.disabled(model.busy || model.duration < 0.1)
-                .onChange(of: model.gifStart) { _, value in
-                    model.gifStart = max(0, min(value, max(0, model.duration - 0.1)))
-                    model.gifDuration = max(0.1, min(model.gifDuration, maxGIFDuration))
-                }
+            if model.exportFormat == .gif {
+                HStack(spacing: 12) {
+                    Picker("Long edge", selection: $model.gifWidth) {
+                        Text("640 px").tag(640)
+                        Text("960 px").tag(960)
+                        Text("1280 px").tag(1280)
+                    }.frame(width: 175)
+                    Picker("Frame rate", selection: $model.gifFPS) {
+                        Text("10 fps").tag(10)
+                        Text("15 fps").tag(15)
+                        Text("20 fps").tag(20)
+                    }.frame(width: 165)
+                    Spacer(minLength: 0)
+                }.disabled(model.busy).controlSize(.large)
+            }
             if model.exporting {
                 HStack {
-                    ProgressView(value: model.exportProgress)
-                    Text("\(Int(model.exportProgress * 100))%").monospacedDigit()
+                    if model.exportFormat == .gif {
+                        ProgressView(value: model.exportProgress)
+                        Text("\(Int(model.exportProgress * 100))%").monospacedDigit()
+                    } else {
+                        ProgressView().controlSize(.small)
+                        Text("Saving video…")
+                        Spacer()
+                    }
                     Button("Cancel") { model.cancelExport() }.buttonStyle(RecorderButtonStyle())
                 }.frame(height: 44)
             } else {
-                HStack(spacing: 12) {
-                    Button {
-                        model.export(gif: false)
-                    } label: {
-                        Label("Save Video", systemImage: "film").frame(maxWidth: .infinity)
-                    }.buttonStyle(RecorderButtonStyle())
-                    Button {
-                        model.export(gif: true)
-                    } label: {
-                        Label("Export GIF", systemImage: "photo.on.rectangle.angled").frame(
-                            maxWidth: .infinity)
-                    }.buttonStyle(RecorderButtonStyle(tone: .primary))
-                }.disabled(model.busy || model.duration < 0.1)
+                Button {
+                    model.export()
+                } label: {
+                    Label(
+                        model.exportFormat == .gif ? "Export GIF" : "Save Video",
+                        systemImage:
+                            model.exportFormat == .gif ? "photo.on.rectangle.angled" : "film"
+                    )
+                    .frame(maxWidth: .infinity)
+                }.buttonStyle(RecorderButtonStyle(tone: .primary))
+                    .disabled(model.busy || model.duration < 0.1)
             }
         }.font(.system(size: 12))
     }
@@ -298,15 +320,13 @@ struct MainView: View {
             Text(model.formattedElapsed).monospacedDigit()
             Spacer(minLength: 0)
             Button(model.phase == .paused ? "Resume" : "Pause") { model.togglePause() }.buttonStyle(
-                RecorderButtonStyle())
+                RecorderButtonStyle()
+            ).disabled(model.pauseIsChanging)
             Button("Record Again") { model.restartRecording() }.buttonStyle(RecorderButtonStyle())
                 .help("Save this take, then start a new one")
             Button("Stop") { model.stopRecording() }.buttonStyle(RecorderButtonStyle(tone: .destructive))
         }.disabled(!model.canControlRecording)
     }
-
-    /// The animated image cannot run past the end of the clip, whatever the app's own cap says.
-    private var maxGIFDuration: Double { max(0.1, min(60, model.duration - model.gifStart)) }
 
     private func clock(_ time: Double) -> String {
         let value = max(0, Int(time.isFinite ? time : 0))
