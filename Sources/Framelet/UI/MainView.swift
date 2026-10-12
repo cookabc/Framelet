@@ -215,7 +215,7 @@ struct MainView: View {
                     .help(
                         "Show ScreenCaptureKit's native click feedback in the video. No keyboard monitoring.")
                 Spacer()
-                Text("Silent recording · no keyboard monitoring")
+                Text("Silent recording · annotations on area takes")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }.font(.system(size: 12))
         }.frame(height: 66).disabled(model.busy)

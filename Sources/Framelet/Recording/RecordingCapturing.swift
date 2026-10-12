@@ -6,7 +6,8 @@ protocol RecordingCapturing: AnyObject {
     var onStarted: (() -> Void)? { get set }
     var onFinished: ((Result<URL, Error>) -> Void)? { get set }
     func start(
-        region: CaptureRegion, url: URL, fps: Int, cursor: Bool, codec: VideoCodec, clicks: Bool
+        region: CaptureRegion, url: URL, fps: Int, cursor: Bool, codec: VideoCodec,
+        effects: RecordingEffects?, clicks: Bool
     ) async throws
     func pause() async
     func resume() async

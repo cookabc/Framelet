@@ -6,6 +6,8 @@ struct RecorderButtonStyle: ButtonStyle {
         case primary, secondary, destructive
         case row(Bool)
         case dark
+        /// A selected control on the dark recording bar.
+        case accent
     }
     var tone: Tone = .secondary
     var height: CGFloat = 44
@@ -27,14 +29,14 @@ struct RecorderButtonStyle: ButtonStyle {
 
     private var foreground: Color {
         switch tone {
-        case .primary, .dark: return .white
+        case .primary, .dark, .accent: return .white
         case .destructive: return Color(red: 0.72, green: 0.20, blue: 0.20)
         default: return Color(red: 0.12, green: 0.34, blue: 0.29)
         }
     }
     private var background: Color {
         switch tone {
-        case .primary: return Color(red: 0.14, green: 0.43, blue: 0.37)
+        case .primary, .accent: return Color(red: 0.14, green: 0.43, blue: 0.37)
         case .destructive: return .red.opacity(0.07)
         case .row(let selected): return selected ? Color.green.opacity(0.09) : .clear
         case .dark: return .white.opacity(0.12)

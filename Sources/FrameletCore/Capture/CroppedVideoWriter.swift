@@ -20,6 +20,8 @@ public final class CroppedVideoWriter: @unchecked Sendable {
     private let onFailure: (Error) -> Void
     private let uptime: () -> Double
     private var source: CGRect
+    private let globalFrame: CGRect?
+    private let effects: RecordingEffects?
     // Accessed only on queue.
     private var lastTime: CMTime?
     private var lastMediaTime: CMTime?
@@ -32,10 +34,15 @@ public final class CroppedVideoWriter: @unchecked Sendable {
     private var finishResult: Result<URL, Error>?
     private var finishWaiters: [CheckedContinuation<URL, Error>] = []
     private var needsRefresh = false
+    private var paintedRevision: UInt64 = 0
+    private var paintedSource: CGRect?
+    private var overlayContext: CGContext?
+    private var overlayImage: CGImage?
 
     public init(
         url: URL, source: CGRect, displaySize: CGSize, outputSize: CGSize, fps: Int,
         codec: VideoCodec = .h264,
+        effects: RecordingEffects? = nil, globalFrame: CGRect? = nil,
         onStarted: @escaping () -> Void = {}, onFailure: @escaping (Error) -> Void = { _ in },
         uptime: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }
     ) throws {
@@ -58,6 +65,8 @@ public final class CroppedVideoWriter: @unchecked Sendable {
         self.displaySize = displaySize
         self.outputSize = outputSize
         self.frameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+        self.effects = effects
+        self.globalFrame = globalFrame
         self.onStarted = onStarted
         self.onFailure = onFailure
         self.uptime = uptime
@@ -110,7 +119,8 @@ public final class CroppedVideoWriter: @unchecked Sendable {
                 time.isNumeric, time > lastTime,
                 (time - lastTime).seconds >= frameInterval.seconds * 0.95
             else { return }
-            guard needsRefresh
+            let snapshot = effects?.snapshot(at: time.seconds)
+            guard needsRefresh || snapshot.map({ $0.revision != paintedRevision }) == true
             else { return }
             _ = appendOnQueue(buffer, at: time)
         }
@@ -154,8 +164,9 @@ public final class CroppedVideoWriter: @unchecked Sendable {
                 .transformed(
                     by: CGAffineTransform(
                         scaleX: outputSize.width / crop.width, y: outputSize.height / crop.height))
+            let composed = compose(image, at: time)
             context.render(
-                image, to: destination, bounds: CGRect(origin: .zero, size: outputSize),
+                composed, to: destination, bounds: CGRect(origin: .zero, size: outputSize),
                 colorSpace: colorSpace)
             guard adaptor.append(destination, withPresentationTime: mediaTime) else {
                 throw writer.error ?? Self.error("A video frame could not be saved.")
@@ -175,6 +186,37 @@ public final class CroppedVideoWriter: @unchecked Sendable {
             onFailure(error)
             return false
         }
+    }
+
+    private func compose(_ image: CIImage, at time: CMTime) -> CIImage {
+        guard let effects, let globalFrame else { return image }
+        let snapshot = effects.snapshot(at: time.seconds)
+        if snapshot.marks.isEmpty {
+            paintedRevision = snapshot.revision
+            paintedSource = source
+            overlayImage = nil
+            return image
+        }
+        if paintedRevision == snapshot.revision, paintedSource == source, let overlayImage {
+            return CIImage(cgImage: overlayImage).composited(over: image)
+        }
+        let width = Int(outputSize.width)
+        let height = Int(outputSize.height)
+        if overlayContext == nil {
+            overlayContext = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        }
+        guard let overlayContext else { return image }
+        overlayContext.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        let projection = CaptureProjection(
+            frame: globalFrame, source: source, bufferSize: displaySize, outputSize: outputSize)
+        OverlayPainter.draw(snapshot, in: overlayContext, projection: projection)
+        guard let overlay = overlayContext.makeImage() else { return image }
+        paintedRevision = snapshot.revision
+        paintedSource = source
+        overlayImage = overlay
+        return CIImage(cgImage: overlay).composited(over: image)
     }
 
     /// Returns only once the writer queue has gated appending and recorded the pause boundary.

@@ -6,14 +6,14 @@ import UniformTypeIdentifiers
 
 /// Recording options the user should not have to set again on every launch.
 private enum SettingsKey {
-    static let showsClicks = "showsClicks"
-    static let codec = "recordingCodec"
     static let fps = "recordingFPS"
     static let showsCursor = "showsCursor"
     static let gifFPS = "gifFPS"
-    static let gifDither = "gifDither"
     static let gifWidth = "gifWidth"
+    static let gifDither = "gifDither"
+    static let showsClicks = "showsClicks"
     static let countdownSeconds = "countdownSeconds"
+    static let codec = "recordingCodec"
 }
 
 enum ClipExportFormat: String, CaseIterable {
@@ -60,6 +60,11 @@ final class RecorderModel: ObservableObject {
     @Published var showsClicks = false {
         didSet { defaults.set(showsClicks, forKey: SettingsKey.showsClicks) }
     }
+    /// The tool the floating bar has selected.
+    @Published var annotationTool: AnnotationTool = .pen
+    @Published var annotationColor = 0
+    /// Whether drawing mode is on, so the pointer lands on the recording instead of the app.
+    @Published var annotating = false
     @Published private(set) var pauseIsChanging = false
     /// How long to wait after the region is confirmed before capture starts. Raise it to capture
     /// something that has to be opened by hand, such as a menu bar panel.
@@ -92,6 +97,7 @@ final class RecorderModel: ObservableObject {
     private var timer: Timer?
     private var clock = RecordingClock()
     private var region: CaptureRegion?
+    private var board: AnnotationBoard?
     // Keep in-progress files out of the library until the encoder and validation have succeeded.
     private var takeURL: URL?
     private var sessionDirectory: URL?
@@ -129,7 +135,6 @@ final class RecorderModel: ObservableObject {
         self.engineFactory = engineFactory
         trashFile = trash
         defaults.register(defaults: [
-            SettingsKey.codec: VideoCodec.h264.rawValue,
             SettingsKey.fps: 30,
             SettingsKey.showsCursor: true,
             SettingsKey.showsClicks: false,
@@ -137,17 +142,18 @@ final class RecorderModel: ObservableObject {
             SettingsKey.gifWidth: 960,
             SettingsKey.gifDither: true,
             SettingsKey.countdownSeconds: 3,
+            SettingsKey.codec: VideoCodec.h264.rawValue,
         ])
         // Stored values are clamped back into the ranges the capture and export paths accept,
         // so a hand-edited or stale default cannot reach them verbatim.
         fps = min(240, max(1, defaults.integer(forKey: SettingsKey.fps)))
         showsCursor = defaults.bool(forKey: SettingsKey.showsCursor)
         showsClicks = defaults.bool(forKey: SettingsKey.showsClicks)
-        codec = VideoCodec(rawValue: defaults.string(forKey: SettingsKey.codec) ?? "") ?? .h264
         gifFPS = min(30, max(1, defaults.integer(forKey: SettingsKey.gifFPS)))
         gifWidth = min(1920, max(64, defaults.integer(forKey: SettingsKey.gifWidth)))
         gifDither = defaults.object(forKey: SettingsKey.gifDither) as? Bool ?? true
         countdownSeconds = min(10, max(1, defaults.integer(forKey: SettingsKey.countdownSeconds)))
+        codec = VideoCodec(rawValue: defaults.string(forKey: SettingsKey.codec) ?? "") ?? .h264
         reloadClips()
     }
 
@@ -401,17 +407,75 @@ final class RecorderModel: ObservableObject {
         }
         do {
             try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+            prepareOverlays(for: region)
             try await engine.start(
-                region: region, url: url, fps: fps, cursor: showsCursor, codec: codec, clicks: showsClicks)
+                region: region, url: url, fps: fps, cursor: showsCursor, codec: codec,
+                effects: activeEffects, clicks: showsClicks)
         } catch {
             guard self.engine === engine else { return }
             await takeFinished(.failure(error))
         }
     }
 
+    // MARK: - Annotations and input feedback
+
+    /// Annotations and input feedback are composited into the take, so the store is created with
+    /// the take and discarded with it.
+    private var activeEffects: RecordingEffects?
+
+    private func prepareOverlays(for region: CaptureRegion) {
+        tearDownOverlays()
+        guard region.windowID == nil else { return }
+        let effects = RecordingEffects()
+        activeEffects = effects
+        let board = AnnotationBoard(effects: effects, model: self)
+        board.show(over: region.rect)
+        self.board = board
+    }
+
+    private func tearDownOverlays() {
+        board?.close()
+        board = nil
+        activeEffects = nil
+        annotating = false
+        pauseIsChanging = false
+    }
+
+    /// Annotation is a mode: until it is switched on, the pointer keeps reaching the demonstrated
+    /// app and nothing is drawn.
+    var canAnnotate: Bool { board?.isActive == true && canControlRecording && !pauseIsChanging }
+    var isAnnotating: Bool { canAnnotate && annotating }
+    var isWindowRecording: Bool { region?.windowID != nil }
+
+    func toggleAnnotating() { setAnnotating(!annotating) }
+
+    func setAnnotating(_ enabled: Bool) {
+        guard canAnnotate else {
+            annotating = false
+            board?.setDrawing(false)
+            return
+        }
+        annotating = enabled
+        board?.setDrawing(enabled)
+    }
+
+    func selectTool(_ tool: AnnotationTool) {
+        annotationTool = tool
+        board?.refresh()
+    }
+
+    func selectColor(_ index: Int) {
+        annotationColor = max(0, min(index, AnnotationColors.markColors.count - 1))
+        board?.refresh()
+    }
+
+    func undoAnnotation() { board?.undo() }
+    func clearAnnotations() { board?.clear() }
+
     func stopRecording() {
         guard canControlRecording else { return }
         guard let activeEngine = engine else { return }
+        setAnnotating(false)
         setPhase(.stopping)
         Task { await activeEngine.stop() }
     }
@@ -419,6 +483,7 @@ final class RecorderModel: ObservableObject {
     func togglePause() {
         guard canControlRecording, !pauseIsChanging, let activeEngine = engine else { return }
         let wasPaused = phase == .paused
+        setAnnotating(false)
         pauseIsChanging = true
         Task {
             if wasPaused { await activeEngine.resume() } else { await activeEngine.pause() }
@@ -455,6 +520,7 @@ final class RecorderModel: ObservableObject {
     func restartRecording() {
         guard canControlRecording else { return }
         guard let activeEngine = engine else { return }
+        setAnnotating(false)
         setPhase(.restarting)
         // Stopping naturally flows into `takeFinished`, which starts the next countdown over the
         // same region when the previous take was saved.
@@ -470,7 +536,7 @@ final class RecorderModel: ObservableObject {
         elapsed = clock.elapsed(at: ProcessInfo.processInfo.systemUptime)
         timer?.invalidate()
         timer = nil
-        pauseIsChanging = false
+        tearDownOverlays()
         let restart = restartAfterSave
         restartAfterSave = false
         panel?.close()

@@ -32,7 +32,8 @@ final class CaptureEngine: NSObject, SCStreamDelegate {
     var onFinished: ((Result<URL, Error>) -> Void)?
 
     func start(
-        region: CaptureRegion, url: URL, fps: Int, cursor: Bool, codec: VideoCodec, clicks: Bool = false
+        region: CaptureRegion, url: URL, fps: Int, cursor: Bool, codec: VideoCodec,
+        effects: RecordingEffects?, clicks: Bool = false
     ) async throws {
         guard !requestedStart else { throw Self.error("This capture has already been started.") }
         requestedStart = true
@@ -89,6 +90,8 @@ final class CaptureEngine: NSObject, SCStreamDelegate {
         config.capturesAudio = false
         let writer = try CroppedVideoWriter(
             url: url, source: source, displaySize: surfaceSize, outputSize: size, fps: fps, codec: codec,
+            effects: region.windowID == nil ? effects : nil,
+            globalFrame: region.windowID == nil ? region.screen.frame : nil,
             onStarted: { [weak self] in
                 Task { @MainActor in
                     guard let self, !self.completed, self.finalization == nil else { return }
