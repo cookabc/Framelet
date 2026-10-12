@@ -83,12 +83,14 @@ final class LibraryInteractionTests: XCTestCase {
         XCTAssertEqual(first.gifFPS, 15)
         XCTAssertEqual(first.gifWidth, 960)
         XCTAssertEqual(first.countdownSeconds, 3)
+        XCTAssertEqual(first.codec, .h264)
 
         first.fps = 60
         first.showsCursor = false
         first.gifFPS = 20
         first.gifWidth = 1280
         first.countdownSeconds = 10
+        first.codec = .hevc
 
         let relaunched = RecorderModel(libraryURL: root, defaults: defaults)
         XCTAssertEqual(relaunched.fps, 60)
@@ -96,6 +98,7 @@ final class LibraryInteractionTests: XCTestCase {
         XCTAssertEqual(relaunched.gifFPS, 20)
         XCTAssertEqual(relaunched.gifWidth, 1280)
         XCTAssertEqual(relaunched.countdownSeconds, 10)
+        XCTAssertEqual(relaunched.codec, .hevc)
     }
 
     func testRubbishStoredCountdownStillLeavesACountableDelay() async throws {

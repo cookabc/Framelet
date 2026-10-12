@@ -1,3 +1,4 @@
+import FrameletCore
 import SwiftUI
 
 private let ink = Color(red: 0.12, green: 0.21, blue: 0.21)
@@ -193,6 +194,18 @@ struct MainView: View {
                 }.pickerStyle(.inline)
             } label: {
                 Text("Recording: \(model.fps) fps")
+            }
+            .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
+            Menu {
+                Picker("Codec", selection: $model.codec) {
+                    ForEach(VideoCodec.allCases, id: \.self) { codec in
+                        Text(codec.label).tag(codec)
+                    }
+                }.pickerStyle(.inline)
+                Text("HEVC can reduce file size; H.264 is more widely compatible")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            } label: {
+                Text(model.codec.label)
             }
             .menuStyle(.button).buttonStyle(RecorderButtonStyle()).fixedSize()
         }.font(.system(size: 12)).frame(height: 40).disabled(model.busy)

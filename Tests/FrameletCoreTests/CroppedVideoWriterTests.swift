@@ -35,13 +35,13 @@ final class CroppedVideoWriterTests: XCTestCase {
     }
 
     private func writer(
-        in root: URL, clock: Clock
+        in root: URL, clock: Clock, codec: VideoCodec = .h264
     ) throws -> CroppedVideoWriter {
         try CroppedVideoWriter(
             url: root.appendingPathComponent("take-\(UUID().uuidString).mp4"),
             source: CGRect(x: 100, y: 0, width: 100, height: 50),
             displaySize: CGSize(width: 200, height: 100), outputSize: CGSize(width: 100, height: 50),
-            fps: 30,
+            fps: 30, codec: codec,
             onFailure: { XCTFail("\($0)") }, uptime: { clock.now() })
     }
 
@@ -214,5 +214,29 @@ final class CroppedVideoWriterTests: XCTestCase {
             try CroppedVideoWriter(
                 url: root.appendingPathComponent("odd.mp4"), source: CGRect(origin: .zero, size: size),
                 displaySize: size, outputSize: CGSize(width: 101, height: 50), fps: 30))
+    }
+    func testHEVCStillRecordsTheChosenCodecAfterAPause() async throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = Clock()
+        let writer = try writer(in: root, clock: clock, codec: .hevc)
+        let buffer = try displayFrame()
+        try await append(writer, buffer: buffer, at: 100, clock: clock)
+        clock.set(101)
+        await writer.pause()
+        clock.set(109)
+        await writer.resume()
+        try await append(writer, buffer: buffer, at: 110, clock: clock)
+        clock.set(111)
+        let url = try await writer.finish()
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let formats = try await XCTUnwrap(tracks.first).load(.formatDescriptions)
+        XCTAssertEqual(
+            CMFormatDescriptionGetMediaSubType(try XCTUnwrap(formats.first)), kCMVideoCodecType_HEVC)
+        let duration = try await asset.load(.duration).seconds
+        XCTAssertEqual(duration, 3, accuracy: 0.04)
+        let generator = AVAssetImageGenerator(asset: asset)
+        _ = try await generator.image(at: .zero)
     }
 }

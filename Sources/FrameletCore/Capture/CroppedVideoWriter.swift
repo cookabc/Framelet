@@ -35,6 +35,7 @@ public final class CroppedVideoWriter: @unchecked Sendable {
 
     public init(
         url: URL, source: CGRect, displaySize: CGSize, outputSize: CGSize, fps: Int,
+        codec: VideoCodec = .h264,
         onStarted: @escaping () -> Void = {}, onFailure: @escaping (Error) -> Void = { _ in },
         uptime: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }
     ) throws {
@@ -64,7 +65,7 @@ public final class CroppedVideoWriter: @unchecked Sendable {
         input = AVAssetWriterInput(
             mediaType: .video,
             outputSettings: [
-                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoCodecKey: codec.avCodecType,
                 AVVideoWidthKey: Int(outputSize.width), AVVideoHeightKey: Int(outputSize.height),
                 AVVideoCompressionPropertiesKey: [
                     AVVideoExpectedSourceFrameRateKey: fps,
