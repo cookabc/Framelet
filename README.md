@@ -27,8 +27,11 @@ when the system asks.
 | Choose a window or menu panel | Hover to highlight, then click, press Return or press the recording shortcut again |
 | Choose an area | Drag out the area and release |
 | Cancel choosing | Press Escape or right-click |
+| Move the recorded area | Click "Move area", then drag inside the area; release to finish or right-click to cancel. Dragging the handle directly also works |
+| Draw on the recording | The pencil button on the floating bar, then draw over the area |
+| Undo a mark / clear all marks | The undo and eraser buttons that appear while drawing |
 | Record again | The record-again button on the floating bar saves the current video first, then records again over the same region |
-| Export | "Save Video" or "Export GIF" |
+| Export | Choose MP4 or GIF, set the start and duration, then save |
 | Delete | "Delete", or right-click a recording in the list, then confirm to move it to the Trash |
 
 Recording starts after a countdown, three seconds by default and settable to 5 or 10. Paused time is
@@ -59,36 +62,72 @@ area first and reopen the panel during the countdown, which can be raised to 5 o
 "Record Again" reuses the same area. Normal windows still use window capture and dragging still
 selects an arbitrary area.
 
-## Recording and files
+## Recording, annotations and files
 
-- Area mode can select on any display, but one capture stays within a single display.
-- Area mode captures composed display frames and crops them before encoding, so popup composition
-  does not depend on the selection's edges. Only the selected area is written to disk. Processing
-  full display frames can use more GPU memory than capturing a small source rectangle directly.
-- Window mode follows the window you picked and locks the output size to the size it had when the
-  capture started. Resizing the window afterwards can leave blank edges, and closing it means the
-  recording cannot continue.
-- 30 frames per second by default, 60 as an option, and the cursor can be shown or hidden. Output is
-  H.264 video, with the long edge capped at 3840 pixels.
-- Animated images loop, with a configurable start, duration, frame rate and long edge. They are capped
-  at 60 seconds and default to the first 10 seconds, or the whole clip when it is shorter.
-- Videos and animated images are saved as `.mp4` and `.gif`, both without sound.
-- Original recordings live in `~/Library/Application Support/Framelet/Recordings/`. Closing the window
-  or exporting does not delete them, and deleting an original leaves any exported copy alone.
-- Pausing writes a media segment and stopping joins the segments back together. The intermediate
-  segments are only cleaned up once the joined video has been saved; if that fails they are kept in an
-  "Unfinished" folder inside the recordings folder.
-- On the next launch, segments left in "Unfinished" are joined into ordinary recordings and added to
-  the list, and folders holding nothing usable are discarded. A failed join never consumes the
-  original segments, so it can simply be retried on the next launch; a session that cannot be joined
-  at all is reported in the status line rather than retried in silence.
-- Exports are written to a temporary file and only replace the destination on success, so cancelling or
-  failing leaves any existing file untouched. Cancelling a video export stops the copy immediately
-  instead of waiting for the whole file.
-- The recording options — frame rate, cursor visibility, countdown length, and the animated image's
-  frame rate and long edge — are remembered between launches, along with the main window's size and
-  position. The animated image's start and duration are reset per recording, since they describe the
-  selected clip.
+- Area mode selects on any display, but one take remains within a single display. Moving the controls
+  only moves the controls. Click "Move area" to activate a dashed-border movement surface and drag
+  inside it, or drag the handle directly. Releasing finishes the move; right-click cancels the mode.
+- Area mode crops composed display frames before encoding. Only selected pixels are saved. Processing
+  whole-display frames can use more GPU memory than capturing a source rectangle directly.
+- Window mode follows the selected window and locks the output dimensions at the start of the take.
+  System scaling handles later size changes; closing the target may interrupt capture.
+- 30 fps is the default, with 60 fps available. The cursor can be shown or hidden. Optional native
+  ScreenCaptureKit click feedback is off by default and needs no global keyboard monitoring.
+- Video is H.264 by default, or HEVC, with the long edge capped at 3840 pixels. HEVC can reduce file
+  size, but the result depends on content and the available encoder, not a fixed reduction ratio.
+- Pausing gates frames without restarting capture and removes the actual pause from the media
+  timeline. Static content before a pause and after resume still contributes active recording time.
+
+### Drawing on an area recording
+
+Use the pencil button to enter drawing mode. Pen, highlighter, arrow, five colours, undo and clear
+are shown inside the expanded control bar. Outside drawing mode, the drawing surface ignores mouse
+input and leaves the target usable. Neither panel becomes the key window.
+
+The preview and encoded video use the same annotation painter. Finished marks remain visible, and
+static content is refreshed when marks change. Undo and clear change future frames, not frames
+already saved. Marks use desktop coordinates and disappear from the picture when the recording area
+moves away from them. Window mode deliberately has no fixed-area drawing or movement controls;
+its control bar says that it follows the window and that drag-selecting an area enables annotations.
+
+There are no global keyboard taps or key bubbles. The app's registered control shortcuts do not read
+ordinary typing. Click feedback is provided by ScreenCaptureKit itself.
+
+### Preview, trim and export
+
+- Videos are silent `.mp4`; animated images are looping `.gif`.
+- Choose an export format, set its start and duration, and save a new file. Video defaults to the whole
+  clip. Full, silent MP4 exports copy the recording; shorter ranges use native passthrough export.
+  Passthrough preserves encoded media but does not promise arbitrary frame-accurate cuts for every codec.
+- GIF defaults to the first 10 seconds or the entire shorter clip, with a 60-second limit. Frame rate
+  and long edge are configurable. The shared palette is derived from sampled original RGB values;
+  GIF's 256-colour limit and histogram binning can still change colours.
+- Dithering is on by default for smoother gradients; turn it off to keep fills flat. It is not a
+  lossless-colour switch. GIF frame delays use cumulative centisecond boundaries to avoid timing drift.
+- Exports stage beside the destination and replace it only after success. Cancellation or failure
+  preserves an existing file. Exporting over an original or its hard/symbolic link is rejected.
+
+### Library and recovery
+
+Original recordings live in `~/Library/Application Support/Framelet/Recordings/`. Closing the window
+or exporting never deletes them. Delete requires confirmation and moves an original to the Trash;
+exported copies stay untouched.
+
+A current take is staged in an `Unfinished` session directory. Only a completed, validated video enters
+its final library name. If a stream interruption still permits finalization, the file is saved with
+an interruption notice, not reported as a normal success. Non-empty failed files remain available for
+inspection, even when they cannot be decoded; recovery does not promise to repair a truncated MP4.
+
+On launch, Framelet attempts to recover current single-file takes and legacy segmented takes. Failed
+recovery retains the sources. Only confirmed empty directories or zero-byte video husks are discarded;
+unreadable files and unknown session contents are not silently deleted.
+
+Frame rate, cursor visibility, click feedback, codec, countdown and GIF quality settings are remembered
+between launches, together with the main window's size and position. Export ranges reset for each clip
+and each selected format.
+
+The full feature inventory, removals and scope decisions are in
+[功能全集与取舍](docs/features.md).
 
 ## Development and installation
 
@@ -128,12 +167,15 @@ xcrun swift-format lint --strict --recursive Sources Tests scripts Package.swift
 
 ### What the tests cover
 
-`swift test` covers coordinate conversion, window hit testing, permission error classification,
-pause-aware timing, media assembly, animated image export, file protection and deletion boundaries, the
-enumeration and cleanup of unfinished takes with their segment order, the chunk boundaries of
-cancellable copying, and that the recording options survive a relaunch. The interaction tests drive the
-selection view's event handling directly, covering the first click, double click, drag, Return to
-confirm, and the panel's properties.
+`swift test` covers capture geometry, window selection, permission error classification, media
+encoding and decoding, repeated pauses and static-frame duration, fixed-size crop movement, HEVC,
+annotation placement and static-screen refresh, shared GIF palettes and dithering, frame delays,
+non-destructive video trimming, cancellation, source-link protection, recovery and deletion boundaries.
+
+Interaction tests directly drive selection and annotation input, check non-activating panels and
+small-screen control layouts, and inject a capture implementation to verify the first take's overlay
+wiring, pause/resume, accepted movement, interrupted-file preservation and per-clip export ranges.
+The minimum main-window size is rendered for both export formats.
 
 GitHub Actions runs the tests, a release-mode build, the formatting lint, and checks of the build script
 and the app's information file on every push and pull request. It does not install the app, use a
