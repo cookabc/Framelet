@@ -67,12 +67,24 @@ final class SelectionKeys {
         // `stop` already tears everything down on the main thread on every real path; this only
         // guards the ones that skip it. Carbon registration belongs on the main thread and deinit
         // has no isolation guarantee, so hop over unless already there.
-        let leftoverKeys = keys
-        let leftoverHandler = handler
-        let teardown = {
-            for key in leftoverKeys { UnregisterEventHotKey(key) }
-            if let leftoverHandler { RemoveEventHandler(leftoverHandler) }
+        let leftovers = Leftovers(keys: keys, handler: handler)
+        if Thread.isMainThread {
+            leftovers.tearDown()
+        } else {
+            DispatchQueue.main.async { leftovers.tearDown() }
         }
-        if Thread.isMainThread { teardown() } else { DispatchQueue.main.async(execute: teardown) }
+    }
+
+    /// Carries the registrations across to the main queue. The Carbon references only have to be
+    /// released on the main thread and are never dereferenced here, so the box exists to make the
+    /// closure handed to `DispatchQueue.main.async` sendable.
+    private struct Leftovers: @unchecked Sendable {
+        let keys: [EventHotKeyRef]
+        let handler: EventHandlerRef?
+
+        func tearDown() {
+            for key in keys { UnregisterEventHotKey(key) }
+            if let handler { RemoveEventHandler(handler) }
+        }
     }
 }
