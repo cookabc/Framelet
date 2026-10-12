@@ -63,9 +63,27 @@ final class AnnotationBoard {
 
     /// Capture is explicit, and never makes the panel or its view a keyboard responder.
     func setDrawing(_ enabled: Bool) {
+        if enabled { view?.setMoving(false) }
         view?.setDrawing(enabled)
-        window?.ignoresMouseEvents = !enabled
+        window?.ignoresMouseEvents = !(enabled || view?.movingEnabled == true)
         if let view { window?.invalidateCursorRects(for: view) }
+    }
+
+    func setMoving(_ enabled: Bool, moveArea: @escaping (CGRect) -> Bool, onFinished: @escaping () -> Void) {
+        if enabled { view?.setDrawing(false) }
+        view?.moveArea = moveArea
+        view?.onMoveFinished = onFinished
+        view?.setMoving(enabled)
+        window?.ignoresMouseEvents = !(enabled || view?.drawingEnabled == true)
+        if let view { window?.invalidateCursorRects(for: view) }
+    }
+
+    func move(to rect: CGRect) {
+        guard isActive, rect.width >= 24, rect.height >= 24, !rect.isInfinite, !rect.isNull else { return }
+        // Do not connect a stroke begun in the old surface to a point in the new surface.
+        view?.finishStroke()
+        window?.setFrame(rect, display: true)
+        refresh()
     }
 
     func refresh() {
@@ -134,6 +152,11 @@ final class StrokeView: NSView {
     var toolProvider: (() -> AnnotationTool)?
     var colorProvider: (() -> Int)?
     private(set) var drawingEnabled = false
+    private(set) var movingEnabled = false
+    var moveArea: (CGRect) -> Bool = { _ in false }
+    var onMoveFinished: () -> Void = {}
+    private var moveStart: CGPoint?
+    private var moveFrame: CGRect?
     private var activeMark: UUID?
 
     override var isOpaque: Bool { false }
@@ -143,7 +166,24 @@ final class StrokeView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func resetCursorRects() {
-        if drawingEnabled { addCursorRect(bounds, cursor: .crosshair) }
+        if movingEnabled {
+            addCursorRect(bounds, cursor: .openHand)
+        } else if drawingEnabled {
+            addCursorRect(bounds, cursor: .crosshair)
+        }
+    }
+
+    func setMoving(_ enabled: Bool) {
+        if enabled {
+            finishStroke()
+            drawingEnabled = false
+        }
+        movingEnabled = enabled
+        if !enabled {
+            moveStart = nil
+            moveFrame = nil
+        }
+        needsDisplay = true
     }
 
     func setDrawing(_ enabled: Bool) {
@@ -159,6 +199,12 @@ final class StrokeView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if movingEnabled {
+            guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+            moveStart = globalPoint(of: event)
+            moveFrame = window?.frame
+            return
+        }
         guard drawingEnabled, let effects, let tool = toolProvider?(),
             bounds.contains(convert(event.locationInWindow, from: nil))
         else { return }
@@ -173,12 +219,26 @@ final class StrokeView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if movingEnabled {
+            guard let moveStart, let moveFrame else { return }
+            let point = globalPoint(of: event)
+            _ = moveArea(moveFrame.offsetBy(dx: point.x - moveStart.x, dy: point.y - moveStart.y))
+            return
+        }
         guard drawingEnabled, let effects, let id = activeMark else { return }
         effects.extendMark(id: id, to: globalPoint(of: event))
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
+        if movingEnabled {
+            guard moveStart != nil else { return }
+            mouseDragged(with: event)
+            moveStart = nil
+            moveFrame = nil
+            onMoveFinished()
+            return
+        }
         guard drawingEnabled, let effects, let id = activeMark else { return }
         effects.extendMark(id: id, to: globalPoint(of: event))
         finishStroke()
@@ -190,11 +250,22 @@ final class StrokeView: NSView {
         window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        if movingEnabled { onMoveFinished() }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         // A truly clear window has click-through holes on macOS, even with ignoresMouseEvents
         // disabled. Keep a barely visible, continuous hit surface, including after undo/clear.
         NSColor(calibratedWhite: 0, alpha: 0.02).setFill()
         bounds.fill()
+        if movingEnabled {
+            NSColor.systemMint.setStroke()
+            let border = NSBezierPath(rect: bounds.insetBy(dx: 3, dy: 3))
+            border.lineWidth = 2
+            border.setLineDash([6, 4], count: 2, phase: 0)
+            border.stroke()
+        }
         guard let effects, let window, let context = NSGraphicsContext.current?.cgContext else { return }
         let frame = window.convertToScreen(convert(bounds, to: nil))
         let projection = CaptureProjection(

@@ -17,6 +17,8 @@ private final class TestCapture: RecordingCapturing {
     var pauseCalls = 0
     var resumeCalls = 0
     var stopCalls = 0
+    var acceptedMoves: [CGRect] = []
+    var acceptsMove = true
     var pauseDelay: CheckedContinuation<Void, Never>?
     var delaysPause = false
 
@@ -36,6 +38,11 @@ private final class TestCapture: RecordingCapturing {
     }
     func resume() async { resumeCalls += 1 }
     func stop() async { stopCalls += 1 }
+    func moveRegion(to rect: CGRect) -> Bool {
+        guard acceptsMove else { return false }
+        acceptedMoves.append(rect)
+        return true
+    }
 }
 
 @MainActor
@@ -180,6 +187,86 @@ final class RecorderLifecycleTests: XCTestCase {
         XCTAssertFalse(model.pauseIsChanging)
     }
 
+    func testClickMoveModeDragsTheSurfaceWithoutCreatingAnnotations() async throws {
+        let (model, capture, region, _) = try fixture()
+        await model.beginRecording(region: region)
+        let controls = RecordingPanel(model: model)
+        controls.show(near: region)
+        defer { controls.close() }
+        model.toggleAnnotating()
+        XCTAssertTrue(model.isAnnotating)
+        model.toggleMovingRegion()
+        XCTAssertTrue(model.isMovingRegion)
+        XCTAssertFalse(model.isAnnotating)
+        let boardWindow = try XCTUnwrap(NSApp.windows.first { $0.isVisible && $0 is AnnotationPanel })
+        let surface = try XCTUnwrap(boardWindow.contentView as? StrokeView)
+        XCTAssertFalse(boardWindow.ignoresMouseEvents)
+        if let folder = ProcessInfo.processInfo.environment["FRAMELET_UI_SNAPSHOTS"] {
+            try await Task.sleep(for: .milliseconds(150))
+            let view = try XCTUnwrap(controls.window.contentView)
+            view.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let directory = URL(fileURLWithPath: folder, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("move-controls.png"))
+        }
+        let startOrigin = boardWindow.frame.origin
+        func event(_ type: NSEvent.EventType, global: CGPoint) -> NSEvent {
+            NSEvent.mouseEvent(
+                with: type, location: boardWindow.convertPoint(fromScreen: global),
+                modifierFlags: [], timestamp: 1, windowNumber: boardWindow.windowNumber,
+                context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+        }
+        let start = CGPoint(x: startOrigin.x + 40, y: startOrigin.y + 40)
+        let moved = CGPoint(x: start.x + 30, y: start.y + 20)
+        surface.mouseDown(with: event(.leftMouseDown, global: start))
+        surface.mouseDragged(with: event(.leftMouseDragged, global: moved))
+        surface.mouseUp(with: event(.leftMouseUp, global: moved))
+        XCTAssertEqual(capture.acceptedMoves.last, region.rect.offsetBy(dx: 30, dy: 20))
+        XCTAssertEqual(boardWindow.frame, region.rect.offsetBy(dx: 30, dy: 20))
+        XCTAssertFalse(model.isMovingRegion)
+        XCTAssertTrue(boardWindow.ignoresMouseEvents)
+        XCTAssertTrue(capture.effects?.snapshot(at: 0).marks.isEmpty == true)
+        model.toggleMovingRegion()
+        model.toggleAnnotating()
+        XCTAssertFalse(model.isMovingRegion)
+        XCTAssertTrue(model.isAnnotating)
+        model.setAnnotating(false)
+        try await finish(capture, model: model, result: .failure(CocoaError(.fileWriteUnknown)))
+    }
+
+    func testDedicatedMoveChangesCaptureAndBorderOnlyAfterAcceptance() async throws {
+        let (model, capture, region, _) = try fixture()
+        await model.beginRecording(region: region)
+        let controls = RecordingPanel(model: model)
+        controls.show(near: region)
+        defer { controls.close() }
+        let drawingPanel = NSApp.windows.first { $0.isVisible && $0 is AnnotationPanel }
+        XCTAssertLessThan(try XCTUnwrap(drawingPanel).level.rawValue, controls.window.level.rawValue)
+        let unchanged = controls.regionRect
+        controls.window.setFrameOrigin(
+            controls.window.frame.origin.applying(CGAffineTransform(translationX: 20, y: 20)))
+        XCTAssertEqual(controls.regionRect, unchanged)
+        XCTAssertTrue(capture.acceptedMoves.isEmpty)
+        let moved = region.rect.offsetBy(dx: 30, dy: 20)
+        capture.acceptsMove = false
+        XCTAssertFalse(controls.moveArea(to: moved))
+        XCTAssertEqual(controls.regionRect, region.rect)
+        capture.acceptsMove = true
+        XCTAssertTrue(controls.moveArea(to: moved))
+        XCTAssertEqual(controls.regionRect, moved)
+        XCTAssertEqual(controls.border?.frame, moved.insetBy(dx: -2, dy: -2))
+        XCTAssertEqual(capture.acceptedMoves, [moved])
+        let board = NSApp.windows.first { $0.isVisible && $0 is AnnotationPanel }
+        XCTAssertEqual(board?.frame, moved)
+        model.togglePause()
+        try await settle { model.phase == .paused }
+        XCTAssertTrue(model.moveRegion(to: moved.offsetBy(dx: 5, dy: 5)))
+        try await finish(capture, model: model, result: .failure(CocoaError(.fileWriteUnknown)))
+    }
+
     func testWindowTakeDoesNotOfferFixedAreaAnnotationOrMove() async throws {
         let (model, capture, area, _) = try fixture()
         let window = CaptureRegion(
@@ -187,6 +274,7 @@ final class RecorderLifecycleTests: XCTestCase {
         await model.beginRecording(region: window)
         XCTAssertNil(capture.effects)
         XCTAssertFalse(model.canAnnotate)
+        XCTAssertFalse(model.canMoveRegion)
         model.toggleAnnotating()
         XCTAssertFalse(model.isAnnotating)
         let controls = RecordingPanel(model: model)

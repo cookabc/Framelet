@@ -176,6 +176,32 @@ final class CroppedVideoWriterTests: XCTestCase {
         XCTAssertTrue(zip(times, times.dropFirst()).allSatisfy { $0 < $1 })
     }
 
+    func testMovingTheCropRequiresFixedSizeAndRepositionsPixels() async throws {
+        let root = try makeTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = Clock()
+        let writer = try CroppedVideoWriter(
+            url: root.appendingPathComponent("moved.mp4"), source: CGRect(x: 0, y: 0, width: 100, height: 50),
+            displaySize: CGSize(width: 200, height: 100), outputSize: CGSize(width: 100, height: 50),
+            fps: 30, uptime: { clock.now() })
+        let buffer = try displayFrame()
+        try await append(writer, buffer: buffer, at: 100, clock: clock)
+        XCTAssertFalse(writer.updateCrop(to: CGRect(x: 0, y: 0, width: 90, height: 50)))
+        XCTAssertFalse(writer.updateCrop(to: CGRect(x: 110, y: 0, width: 100, height: 50)))
+        XCTAssertTrue(writer.updateCrop(to: CGRect(x: 100, y: 0, width: 100, height: 50)))
+        try await append(writer, buffer: buffer, at: 101, clock: clock)
+        clock.set(102)
+        let url = try await writer.finish()
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let (before, _) = try await generator.image(at: .zero)
+        let (after, _) = try await generator.image(at: CMTime(seconds: 1.5, preferredTimescale: 600))
+        XCTAssertGreaterThan(samplePixel(before)[0], 180)
+        XCTAssertGreaterThan(samplePixel(after)[1], 180)
+        XCTAssertLessThan(samplePixel(after)[0], 60)
+    }
+
     func testHEVCStillRecordsTheChosenCodecAfterAPause() async throws {
         let root = try makeTestDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

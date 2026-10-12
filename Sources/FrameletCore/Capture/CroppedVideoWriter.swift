@@ -14,6 +14,7 @@ public final class CroppedVideoWriter: @unchecked Sendable {
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     private let displaySize: CGSize
     private let outputSize: CGSize
+    private let cropSize: CGSize
     private let frameInterval: CMTime
     private let url: URL
     private let onStarted: () -> Void
@@ -62,6 +63,7 @@ public final class CroppedVideoWriter: @unchecked Sendable {
         else { throw Self.error("The recording settings are outside the supported range.", code: 2) }
         self.url = url
         self.source = source
+        self.cropSize = source.size
         self.displaySize = displaySize
         self.outputSize = outputSize
         self.frameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
@@ -97,6 +99,23 @@ public final class CroppedVideoWriter: @unchecked Sendable {
             ])
         guard writer.canAdd(input) else { throw Self.error("The video encoder could not be configured.") }
         writer.add(input)
+    }
+
+    /// A move cannot resize the take. Acceptance is synchronous; mutation precedes later appends
+    /// on the same serial queue, without launching a task for every drag notification.
+    @discardableResult
+    public func updateCrop(to newSource: CGRect) -> Bool {
+        guard
+            [newSource.minX, newSource.minY, newSource.width, newSource.height].allSatisfy({ $0.isFinite }),
+            newSource.size == cropSize, newSource.minX >= 0, newSource.minY >= 0,
+            CGRect(origin: .zero, size: displaySize).contains(newSource)
+        else { return false }
+        return queue.sync {
+            guard !ending, failure == nil else { return false }
+            source = newSource
+            needsRefresh = true
+            return true
+        }
     }
 
     /// The stream queue blocks instead of retaining an unbounded queue of full-display buffers.

@@ -95,11 +95,32 @@ final class RecordingPanel {
         if hostingView == nil {
             let view = NSHostingView(
                 rootView: RecordingHUD(
-                    model: model, presentation: presentation))
+                    model: model, presentation: presentation,
+                    areaProvider: { [weak self] in self?.regionRect },
+                    moveArea: { [weak self] in self?.moveArea(to: $0) ?? false }))
             view.autoresizingMask = [.width, .height]
             hostingView = view
             window.contentView = view
         }
+    }
+
+    /// Only the dedicated Move area handle enters this path. Moving the controls window has
+    /// no observer and cannot change capture geometry.
+    @discardableResult
+    func moveArea(to proposed: CGRect) -> Bool {
+        guard let model, model.canMoveRegion, let original = regionRect, let screen = regionScreen else {
+            return false
+        }
+        let frame = screen.frame
+        let rect = CGRect(
+            origin: CGPoint(
+                x: min(max(proposed.minX, frame.minX), frame.maxX - original.width),
+                y: min(max(proposed.minY, frame.minY), frame.maxY - original.height)),
+            size: original.size)
+        guard model.moveRegion(to: rect) else { return false }
+        regionRect = rect
+        border?.setFrame(rect.insetBy(dx: -2, dy: -2), display: true)
+        return true
     }
 
     func close() {
@@ -139,6 +160,85 @@ struct RecordingPanelLayout {
     }
 }
 
+/// AppKit owns this gesture so it cannot fall through to NSPanel's background window dragging.
+/// A fixed start rectangle and global pointer delta avoid drift when the region hits a screen edge.
+final class RegionMoveHandle: NSView {
+    var canMove: () -> Bool = { false }
+    var areaProvider: () -> CGRect? = { nil }
+    var moveArea: (CGRect) -> Bool = { _ in false }
+    var onClick: () -> Void = {}
+    private var startPoint: CGPoint?
+    private var startRect: CGRect?
+    private var didDrag = false
+
+    override var acceptsFirstResponder: Bool { false }
+    override var needsPanelToBecomeKey: Bool { false }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        if canMove() { addCursorRect(bounds, cursor: .openHand) }
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard canMove() else { return false }
+        onClick()
+        return true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        startPoint = nil
+        startRect = nil
+        didDrag = false
+        guard canMove(), let rect = areaProvider() else { return }
+        startPoint = globalPoint(event)
+        startRect = rect
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard canMove(), let startPoint, let startRect else { return }
+        let point = globalPoint(event)
+        let dx = point.x - startPoint.x
+        let dy = point.y - startPoint.y
+        guard didDrag || hypot(dx, dy) >= 3 else { return }
+        didDrag = true
+        _ = moveArea(startRect.offsetBy(dx: dx, dy: dy))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard startPoint != nil else { return }
+        mouseDragged(with: event)
+        if canMove(), !didDrag { onClick() }
+        startPoint = nil
+        startRect = nil
+        didDrag = false
+    }
+
+    private func globalPoint(_ event: NSEvent) -> CGPoint {
+        window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+    }
+}
+
+private struct MoveAreaControl: NSViewRepresentable {
+    var canMove: () -> Bool
+    var areaProvider: () -> CGRect?
+    var moveArea: (CGRect) -> Bool
+    var onClick: () -> Void
+
+    func makeNSView(context: Context) -> RegionMoveHandle { RegionMoveHandle() }
+    func updateNSView(_ view: RegionMoveHandle, context: Context) {
+        view.canMove = canMove
+        view.areaProvider = areaProvider
+        view.moveArea = moveArea
+        view.onClick = onClick
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(.button)
+        view.setAccessibilityLabel("Move area")
+        view.setAccessibilityHelp("Click, then drag inside the recording area, or drag this handle directly")
+        view.window?.invalidateCursorRects(for: view)
+    }
+}
+
 private final class RecordingPanelPresentation: ObservableObject {
     @Published var layout = RecordingPanelLayout(
         annotating: false, availableSize: CGSize(width: 1024, height: 768))
@@ -148,6 +248,8 @@ private struct RecordingHUD: View {
     @ObservedObject var model: RecorderModel
     @ObservedObject var presentation: RecordingPanelPresentation
     private var layout: RecordingPanelLayout { presentation.layout }
+    var areaProvider: () -> CGRect?
+    var moveArea: (CGRect) -> Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -178,6 +280,7 @@ private struct RecordingHUD: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
             if model.canControlRecording {
+                if model.canMoveRegion { moveHandle }
                 if model.canAnnotate { annotateButton }
                 if layout.compact {
                     Menu {
@@ -226,6 +329,23 @@ private struct RecordingHUD: View {
                 ProgressView().controlSize(.small).colorScheme(.dark)
             }
         }.padding(.horizontal, layout.compact ? 12 : 16)
+    }
+
+    private var moveHandle: some View {
+        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+            .font(.system(size: 13))
+            .frame(width: 32, height: 36)
+            .background(
+                model.isMovingRegion ? Color.mint.opacity(0.35) : Color.white.opacity(0.12),
+                in: RoundedRectangle(cornerRadius: 9)
+            )
+            .opacity(model.canMoveRegion ? 1 : 0.4)
+            .overlay {
+                MoveAreaControl(
+                    canMove: { model.canMoveRegion }, areaProvider: areaProvider, moveArea: moveArea,
+                    onClick: { model.toggleMovingRegion() })
+            }
+            .help("Click, then drag inside the recording area; or drag this handle directly")
     }
 
     private var annotateButton: some View {
@@ -322,6 +442,7 @@ private struct RecordingHUD: View {
     }
 
     private var subtitle: String {
+        if model.isMovingRegion { return "Drag area · right-click cancels" }
         if model.isWindowRecording { return "Follows window · drag-select an area to annotate" }
         if model.isAnnotating { return "Draw area · pencil exits" }
         if case .countdown = model.phase { return "Arrange what you want to capture" }
@@ -330,6 +451,7 @@ private struct RecordingHUD: View {
 
     private var title: String {
         if model.pauseIsChanging { return model.phase == .paused ? "Resuming…" : "Pausing…" }
+        if model.isMovingRegion { return "Move area" }
         switch model.phase {
         case .countdown(let value): return "Recording in \(value)"
         case .starting: return "Starting…"

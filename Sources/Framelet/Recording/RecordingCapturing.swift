@@ -12,6 +12,7 @@ protocol RecordingCapturing: AnyObject {
     func pause() async
     func resume() async
     func stop() async
+    func moveRegion(to rect: CGRect) -> Bool
 }
 
 extension CaptureEngine: RecordingCapturing {}

@@ -65,6 +65,7 @@ final class RecorderModel: ObservableObject {
     @Published var annotationColor = 0
     /// Whether drawing mode is on, so the pointer lands on the recording instead of the app.
     @Published var annotating = false
+    @Published private(set) var isMovingRegion = false
     @Published private(set) var pauseIsChanging = false
     /// How long to wait after the region is confirmed before capture starts. Raise it to capture
     /// something that has to be opened by hand, such as a menu bar panel.
@@ -438,12 +439,16 @@ final class RecorderModel: ObservableObject {
         board = nil
         activeEffects = nil
         annotating = false
+        isMovingRegion = false
         pauseIsChanging = false
     }
 
     /// Annotation is a mode: until it is switched on, the pointer keeps reaching the demonstrated
     /// app and nothing is drawn.
     var canAnnotate: Bool { board?.isActive == true && canControlRecording && !pauseIsChanging }
+    var canMoveRegion: Bool {
+        board?.isActive == true && region?.windowID == nil && canControlRecording && !pauseIsChanging
+    }
     var isAnnotating: Bool { canAnnotate && annotating }
     var isWindowRecording: Bool { region?.windowID != nil }
 
@@ -455,8 +460,25 @@ final class RecorderModel: ObservableObject {
             board?.setDrawing(false)
             return
         }
+        if enabled { setMovingRegion(false) }
         annotating = enabled
         board?.setDrawing(enabled)
+    }
+
+    func toggleMovingRegion() { setMovingRegion(!isMovingRegion) }
+
+    func setMovingRegion(_ enabled: Bool) {
+        guard !enabled || canMoveRegion else { return }
+        if enabled {
+            annotating = false
+            board?.setDrawing(false)
+        }
+        isMovingRegion = enabled
+        board?.setMoving(
+            enabled,
+            moveArea: { [weak self] rect in
+                self?.panel?.moveArea(to: rect) ?? self?.moveRegion(to: rect) ?? false
+            }, onFinished: { [weak self] in self?.setMovingRegion(false) })
     }
 
     func selectTool(_ tool: AnnotationTool) {
@@ -476,6 +498,7 @@ final class RecorderModel: ObservableObject {
         guard canControlRecording else { return }
         guard let activeEngine = engine else { return }
         setAnnotating(false)
+        setMovingRegion(false)
         setPhase(.stopping)
         Task { await activeEngine.stop() }
     }
@@ -484,6 +507,7 @@ final class RecorderModel: ObservableObject {
         guard canControlRecording, !pauseIsChanging, let activeEngine = engine else { return }
         let wasPaused = phase == .paused
         setAnnotating(false)
+        setMovingRegion(false)
         pauseIsChanging = true
         Task {
             if wasPaused { await activeEngine.resume() } else { await activeEngine.pause() }
@@ -521,11 +545,23 @@ final class RecorderModel: ObservableObject {
         guard canControlRecording else { return }
         guard let activeEngine = engine else { return }
         setAnnotating(false)
+        setMovingRegion(false)
         setPhase(.restarting)
         // Stopping naturally flows into `takeFinished`, which starts the next countdown over the
         // same region when the previous take was saved.
         restartAfterSave = true
         Task { await activeEngine.stop() }
+    }
+
+    @discardableResult
+    func moveRegion(to appKitRect: CGRect) -> Bool {
+        guard canMoveRegion, let current = region,
+            appKitRect.size == current.rect.size,
+            current.screen.frame.contains(appKitRect), engine?.moveRegion(to: appKitRect) == true
+        else { return false }
+        region = CaptureRegion(screen: current.screen, rect: appKitRect, title: current.title)
+        board?.move(to: appKitRect)
+        return true
     }
 
     private func takeFinished(_ result: Result<URL, Error>) async {

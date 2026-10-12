@@ -176,6 +176,26 @@ final class AnnotationInteractionTests: XCTestCase {
         XCTAssertFalse(window.ignoresMouseEvents)
     }
 
+    func testMovingBoardChangesProjectionAndNewStrokeUsesNewGlobalOrigin() async throws {
+        let (board, effects, _) = try board()
+        defer { board.close() }
+        board.setDrawing(true)
+        try stroke(board, from: CGPoint(x: 20, y: 20), to: CGPoint(x: 80, y: 30))
+        let first = try XCTUnwrap(effects.snapshot(at: 0).marks.first)
+        let moved = CGRect(x: -1200, y: 700, width: 320, height: 200)
+        board.move(to: moved)
+        XCTAssertEqual(board.area, moved)
+        XCTAssertEqual(board.view?.bounds.size, moved.size)
+        XCTAssertEqual(
+            effects.snapshot(at: 0).marks.first?.points, first.points,
+            "Marks are stored in global desktop coordinates")
+        try stroke(board, from: CGPoint(x: 20, y: 20), to: CGPoint(x: 80, y: 30))
+        XCTAssertEqual(effects.snapshot(at: 0).marks.last?.points.first, CGPoint(x: -1180, y: 720))
+        board.close()
+        XCTAssertFalse(board.isActive)
+        XCTAssertEqual(board.area, .zero)
+    }
+
     func testPanelRealContentResizesOnAnnotationAndPhaseChanges() async throws {
         let model = try model()
         let panel = RecordingPanel(model: model)
@@ -218,4 +238,65 @@ final class AnnotationInteractionTests: XCTestCase {
         }
     }
 
+    func testMoveHandleSingleClickEntersModeButDragDoesNotToggleIt() async throws {
+        let handle = RegionMoveHandle(frame: CGRect(x: 0, y: 0, width: 32, height: 36))
+        let window = RecordingControlsPanel(
+            contentRect: CGRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView?.addSubview(handle)
+        var clicks = 0
+        var moves = 0
+        handle.canMove = { true }
+        handle.areaProvider = { CGRect(x: 50, y: 50, width: 200, height: 100) }
+        handle.onClick = { clicks += 1 }
+        handle.moveArea = { _ in
+            moves += 1
+            return true
+        }
+        handle.mouseDown(with: mouse(.leftMouseDown, CGPoint(x: 10, y: 10), in: window))
+        handle.mouseUp(with: mouse(.leftMouseUp, CGPoint(x: 11, y: 10), in: window))
+        XCTAssertEqual(clicks, 1)
+        XCTAssertEqual(moves, 0)
+        handle.mouseDown(with: mouse(.leftMouseDown, CGPoint(x: 10, y: 10), in: window))
+        handle.mouseDragged(with: mouse(.leftMouseDragged, CGPoint(x: 20, y: 15), in: window))
+        handle.mouseUp(with: mouse(.leftMouseUp, CGPoint(x: 20, y: 15), in: window))
+        XCTAssertEqual(clicks, 1)
+        XCTAssertGreaterThan(moves, 0)
+    }
+
+    func testMoveAreaHandleUsesGlobalDeltaAndDoesNotDragControls() async throws {
+        _ = NSApplication.shared
+        let panel = RecordingControlsPanel(
+            contentRect: CGRect(x: -1000, y: 400, width: 300, height: 100),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        defer { panel.close() }
+        let handle = RegionMoveHandle(frame: CGRect(x: 50, y: 20, width: 32, height: 36))
+        panel.contentView?.addSubview(handle)
+        var enabled = true
+        var requests: [CGRect] = []
+        let region = CGRect(x: -900, y: 300, width: 200, height: 160)
+        handle.canMove = { enabled }
+        handle.areaProvider = { region }
+        handle.moveArea = {
+            requests.append($0)
+            return true
+        }
+        let controlsFrame = panel.frame
+        XCTAssertFalse(handle.mouseDownCanMoveWindow)
+        XCTAssertFalse(handle.acceptsFirstResponder)
+        handle.mouseDown(with: mouse(.leftMouseDown, CGPoint(x: 60, y: 30), in: panel))
+        handle.mouseDragged(with: mouse(.leftMouseDragged, CGPoint(x: 100, y: 70), in: panel))
+        handle.mouseUp(with: mouse(.leftMouseUp, CGPoint(x: 110, y: 80), in: panel))
+        XCTAssertEqual(requests.last, region.offsetBy(dx: 50, dy: 50))
+        XCTAssertEqual(panel.frame, controlsFrame)
+        enabled = false
+        let count = requests.count
+        handle.mouseDown(with: mouse(.leftMouseDown, CGPoint(x: 60, y: 30), in: panel))
+        handle.mouseDragged(with: mouse(.leftMouseDragged, CGPoint(x: 150, y: 90), in: panel))
+        handle.mouseUp(with: mouse(.leftMouseUp, CGPoint(x: 150, y: 90), in: panel))
+        XCTAssertEqual(requests.count, count)
+    }
 }

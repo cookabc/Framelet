@@ -119,6 +119,16 @@ final class CaptureEngine: NSObject, SCStreamDelegate {
     func pause() async { await output?.writer.pause() }
     func resume() async { await output?.writer.resume() }
 
+    @discardableResult
+    func moveRegion(to rect: CGRect) -> Bool {
+        guard !completed, finalization == nil, let output, let region = output.region,
+            rect.size == region.rect.size, region.screen.frame.contains(rect),
+            NSScreen.screens.contains(where: { $0.frame == region.screen.frame }),
+            let source = CaptureGeometry.sourceRect(selection: rect, screen: region.screen.frame)
+        else { return false }
+        return output.writer.updateCrop(to: source)
+    }
+
     func stop() async { await finalize() }
 
     private func finalize(interruptedBy error: Error? = nil, alreadyStopped: Bool = false) async {
