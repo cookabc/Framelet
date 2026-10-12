@@ -67,14 +67,18 @@ selects an arbitrary area.
 - Area mode selects on any display, but one take remains within a single display. Moving the controls
   only moves the controls. Click "Move area" to activate a dashed-border movement surface and drag
   inside it, or drag the handle directly. Releasing finishes the move; right-click cancels the mode.
-- Area mode crops composed display frames before encoding. Only selected pixels are saved. Processing
+- Area mode requests best-resolution composed display frames and crops them before encoding. Only
+  selected pixels are saved. Selections are aligned inward to the display pixel grid and even output
+  dimensions, trimming at most a few edge pixels instead of resampling the whole small area. Processing
   whole-display frames can use more GPU memory than capturing a source rectangle directly.
 - Window mode follows the selected window and locks the output dimensions at the start of the take.
   System scaling handles later size changes; closing the target may interrupt capture.
 - 30 fps is the default, with 60 fps available. The cursor can be shown or hidden. Optional native
   ScreenCaptureKit click feedback is off by default and needs no global keyboard monitoring.
-- Video is H.264 by default, or HEVC, with the long edge capped at 3840 pixels. HEVC can reduce file
-  size, but the result depends on content and the available encoder, not a fixed reduction ratio.
+- Video is H.264 by default, or HEVC, with the long edge capped at 3840 pixels. Screen-content bitrate
+  targets scale with encoded pixels and frame rate, with a 2 Mbps floor for small recordings. This can
+  use more disk space than system-default compression; it remains lossy. HEVC can reduce file size,
+  but the result depends on content and the available encoder, not a fixed reduction ratio.
 - Pausing gates frames without restarting capture and removes the actual pause from the media
   timeline. Static content before a pause and after resume still contributes active recording time.
 
@@ -96,6 +100,9 @@ ordinary typing. Click feedback is provided by ScreenCaptureKit itself.
 ### Preview, trim and export
 
 - Videos are silent `.mp4`; animated images are looping `.gif`.
+- Preview defaults to "Original size": one video pixel per display pixel, shrinking only when the
+  clip does not fit. "Fit window" can enlarge a small clip and look softer. This switch changes
+  preview only, not the recording or exported resolution; enlarging a small video cannot add detail.
 - Choose an export format, set its start and duration, and save a new file. Video defaults to the whole
   clip. Full, silent MP4 exports copy the recording; shorter ranges use native passthrough export.
   Passthrough preserves encoded media but does not promise arbitrary frame-accurate cuts for every codec.
