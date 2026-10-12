@@ -3,6 +3,14 @@ import XCTest
 @testable import FrameletCore
 
 final class WindowSelectionTests: XCTestCase {
+    func testWindowTitleDoesNotRepeatIdenticalApplicationName() {
+        XCTAssertEqual(WindowSelection.displayTitle(application: "ZCode", window: "ZCode"), "ZCode")
+        XCTAssertEqual(WindowSelection.displayTitle(application: "ZCode", window: " zcode "), "zcode")
+        XCTAssertEqual(
+            WindowSelection.displayTitle(application: "TextEdit", window: "Notes"), "TextEdit · Notes")
+        XCTAssertEqual(WindowSelection.displayTitle(application: "Safari", window: nil), "Safari")
+        XCTAssertEqual(WindowSelection.displayTitle(application: "Safari", window: "   "), "Safari")
+    }
 
     func testWindowSelectionUsesFrontToBackOrder() {
         let front = WindowCandidate(

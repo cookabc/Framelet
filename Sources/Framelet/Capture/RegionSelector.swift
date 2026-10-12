@@ -42,7 +42,7 @@ final class RegionSelector {
                 return WindowCandidate(
                     id: id, ownerPID: app.processID,
                     frame: WindowSelection.appKitRect(fromQuartz: quartz, primaryTop: primaryTop),
-                    title: app.applicationName + (title.map { " · " + $0 } ?? ""))
+                    title: WindowSelection.displayTitle(application: app.applicationName, window: title))
             }
             guard let pid = (item[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
                 pid != ProcessInfo.processInfo.processIdentifier

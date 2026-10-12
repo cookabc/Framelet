@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 public struct WindowCandidate: Equatable {
     public let id: UInt32
@@ -18,6 +19,17 @@ public struct WindowCandidate: Equatable {
 }
 
 public enum WindowSelection {
+    public static func displayTitle(application: String, window: String?) -> String {
+        let app = application.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let title = window?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else {
+            return app
+        }
+        if title.compare(app, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
+            return title
+        }
+        return app.isEmpty ? title : app + " · " + title
+    }
+
     /// Owners whose menu-level windows are system chrome, not content a user would record.
     static let systemOwners: Set<String> = ["Window Server", "Dock", "WindowManager"]
 
