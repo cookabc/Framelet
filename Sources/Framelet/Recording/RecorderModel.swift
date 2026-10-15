@@ -22,6 +22,9 @@ enum ClipExportFormat: String, CaseIterable {
 
 @MainActor
 final class RecorderModel: ObservableObject {
+    /// Second-by-second readouts, kept off this object so a tick repaints the control that shows it
+    /// rather than every view that observes the model. Read `live.x` in views.
+    let live = RecorderLiveState()
     @Published var phase: RecordingPhase = .idle
     @Published var clips: [RecordedClip] = []
     @Published var selected: RecordedClip?
@@ -30,15 +33,12 @@ final class RecorderModel: ObservableObject {
     @Published var resolution = ""
     @Published private(set) var videoPixelSize = CGSize.zero
     @Published var previewSizing: VideoPreviewSizing = .actualSize
-    @Published var playbackTime = 0.0
     @Published var isPlaying = false
-    @Published var elapsed = 0.0
     @Published var errorMessage: String?
     @Published var needsScreenCapturePermission = false
     @Published var notice: String?
     @Published var exporting = false
     @Published private var choosingDestination = false
-    @Published var exportProgress = 0.0
     @Published var lastExport: URL?
     // These outlive a single take, so they are remembered across launches.
     @Published var fps = 30 {
@@ -120,8 +120,10 @@ final class RecorderModel: ObservableObject {
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Framelet/Recordings", isDirectory: true)
     }
+    /// For callers outside the view tree (the status menu builds its title when it opens). Views
+    /// must read `live.formattedElapsed`, which only changes when `live` does.
     var formattedElapsed: String {
-        let seconds = Int(elapsed)
+        let seconds = Int(live.elapsed)
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 
@@ -229,7 +231,7 @@ final class RecorderModel: ObservableObject {
         player = nil
         videoPixelSize = .zero
         isPlaying = false
-        playbackTime = 0
+        live.playbackTime = 0
     }
 
     private func attachPlaybackObservers() {
@@ -237,7 +239,9 @@ final class RecorderModel: ObservableObject {
         playbackObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.1, preferredTimescale: 600), queue: .main
         ) { [weak self] time in
-            Task { @MainActor in self?.playbackTime = max(0, time.seconds.isFinite ? time.seconds : 0) }
+            Task { @MainActor in
+                self?.live.playbackTime = max(0, time.seconds.isFinite ? time.seconds : 0)
+            }
         }
         playbackState = player.publisher(for: \.timeControlStatus).receive(on: DispatchQueue.main).sink {
             [weak self] status in
@@ -254,15 +258,16 @@ final class RecorderModel: ObservableObject {
         if isPlaying {
             player.pause()
         } else {
-            if playbackTime >= duration - 0.1 { player.seek(to: .zero) }
+            if live.playbackTime >= duration - 0.1 { player.seek(to: .zero) }
             player.play()
         }
     }
 
     func seekPlayback(to time: Double) {
         guard !busy else { return }
-        playbackTime = max(0, min(duration, time))
-        player?.seek(to: CMTime(seconds: playbackTime, preferredTimescale: 600))
+        let clamped = max(0, min(duration, time))
+        live.playbackTime = clamped
+        player?.seek(to: CMTime(seconds: clamped, preferredTimescale: 600))
     }
 
     func deleteClip(_ clip: RecordedClip) {
@@ -346,7 +351,7 @@ final class RecorderModel: ObservableObject {
         self.region = region
         recordingTitle = region.title
         clock.reset()
-        elapsed = 0
+        live.elapsed = 0
         restartAfterSave = false
         takeURL = nil
         sessionDirectory = nil
@@ -397,7 +402,7 @@ final class RecorderModel: ObservableObject {
         guard !recovering, !exporting, !choosingDestination, phase == .idle || isCountingDown else { return }
         let region = alignedRegion(selection)
         clock.reset()
-        elapsed = 0
+        live.elapsed = 0
         errorMessage = nil
         notice = nil
         self.region = region
@@ -539,7 +544,7 @@ final class RecorderModel: ObservableObject {
                 setPhase(.recording)
             } else {
                 clock.pause(at: now)
-                elapsed = clock.elapsed(at: now)
+                live.elapsed = clock.elapsed(at: now)
                 timer?.invalidate()
                 timer = nil
                 setPhase(.paused)
@@ -552,7 +557,7 @@ final class RecorderModel: ObservableObject {
         let ticker = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.elapsed = self.clock.elapsed(at: ProcessInfo.processInfo.systemUptime)
+                self.live.tickElapsed(self.clock.elapsed(at: ProcessInfo.processInfo.systemUptime))
             }
         }
         RunLoop.main.add(ticker, forMode: .common)
@@ -589,7 +594,7 @@ final class RecorderModel: ObservableObject {
         setPhase(.stopping)
         engine = nil
         clock.pause(at: ProcessInfo.processInfo.systemUptime)
-        elapsed = clock.elapsed(at: ProcessInfo.processInfo.systemUptime)
+        live.elapsed = clock.elapsed(at: ProcessInfo.processInfo.systemUptime)
         timer?.invalidate()
         timer = nil
         tearDownOverlays()
@@ -805,7 +810,7 @@ final class RecorderModel: ObservableObject {
             self.choosingDestination = false
             guard response == .OK, let destination = savePanel.url else { return }
             self.exporting = true
-            self.exportProgress = 0
+            self.live.exportProgress = 0
             self.notice = nil
             self.lastExport = nil
             self.exportTask = Task { [weak self] in
@@ -816,14 +821,14 @@ final class RecorderModel: ObservableObject {
                             [weak self] value in
                             Task { @MainActor [weak self] in
                                 guard self?.exporting == true else { return }
-                                self?.exportProgress = value
+                                self?.live.setExportProgress(value)
                             }
                         }
                     } else {
                         try await VideoExporter.export(
                             video: clip.url, to: destination, start: start, duration: length)
                     }
-                    self.exportProgress = 1
+                    self.live.exportProgress = 1
                     lastExport = destination
                     notice = "Export complete"
                 } catch is CancellationError { notice = "Export cancelled" } catch {

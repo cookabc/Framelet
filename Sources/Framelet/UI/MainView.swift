@@ -27,7 +27,9 @@ struct MainView: View {
                         .buttonStyle(RecorderButtonStyle(tone: .destructive)).disabled(model.busy)
                     }
                 }.frame(height: 44)
-                if model.hasActiveRecording { recordingControls }
+                if model.hasActiveRecording {
+                    RecordingControlsBar(model: model, live: model.live)
+                }
                 if model.selected != nil { preview } else { emptyPreview }
                 captureSettings
                 if model.selected != nil { exportControls }
@@ -36,6 +38,7 @@ struct MainView: View {
                     Spacer()
                     if model.lastExport != nil {
                         Button("Show File") { model.revealExport() }.buttonStyle(RecorderButtonStyle())
+
                     }
                 }.frame(height: 32)
             }.padding(22).background(paper)
@@ -142,6 +145,7 @@ struct MainView: View {
             } label: {
                 Text("Choose Recording Area").frame(width: 180)
             }.buttonStyle(RecorderButtonStyle(tone: .primary)).disabled(model.busy)
+
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
     }
@@ -152,34 +156,7 @@ struct MainView: View {
                 player: model.player, pixelSize: model.videoPixelSize, sizing: model.previewSizing
             )
             .frame(minHeight: 120, maxHeight: .infinity).background(.black)
-            HStack(spacing: 10) {
-                Button {
-                    model.togglePlayback()
-                } label: {
-                    Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                }.buttonStyle(RecorderButtonStyle()).accessibilityLabel(
-                    model.isPlaying ? "Pause preview" : "Play preview"
-                )
-                .disabled(model.busy || model.duration <= 0)
-                Text(clock(model.playbackTime)).monospacedDigit().frame(width: 42)
-                Slider(
-                    value: Binding(
-                        get: { min(model.playbackTime, max(model.duration, 0.1)) },
-                        set: { model.seekPlayback(to: $0) }),
-                    in: 0...max(model.duration, 0.1)
-                ).accessibilityLabel("Playback position").disabled(model.busy || model.duration <= 0)
-                Text(clock(model.duration)).monospacedDigit().frame(width: 42)
-                Menu {
-                    Picker("Preview size", selection: $model.previewSizing) {
-                        Text("Original size").tag(VideoPreviewSizing.actualSize)
-                        Text("Fit window").tag(VideoPreviewSizing.fitWindow)
-                    }
-                } label: {
-                    Text(model.previewSizing == .actualSize ? "Original size" : "Fit window")
-                }.menuStyle(.borderlessButton).fixedSize()
-                    .help("Original size avoids enlarging small recordings. This changes preview only.")
-                    .accessibilityLabel("Preview size")
-            }.font(.system(size: 11)).padding(8).background(.white)
+            PlaybackBar(model: model, live: model.live)
             if !model.resolution.isEmpty {
                 Text(
                     model.resolution + " px · "
@@ -258,6 +235,7 @@ struct MainView: View {
                     Text("MP4 video").tag(ClipExportFormat.video)
                     Text("Animated GIF").tag(ClipExportFormat.gif)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 230).accessibilityLabel("Export format")
+
                 Spacer(minLength: 0)
                 Button("Reset range") { model.resetExportRange() }
                     .buttonStyle(RecorderButtonStyle(height: 32))
@@ -296,17 +274,7 @@ struct MainView: View {
                 }.disabled(model.busy).controlSize(.large)
             }
             if model.exporting {
-                HStack {
-                    if model.exportFormat == .gif {
-                        ProgressView(value: model.exportProgress)
-                        Text("\(Int(model.exportProgress * 100))%").monospacedDigit()
-                    } else {
-                        ProgressView().controlSize(.small)
-                        Text("Saving video…")
-                        Spacer()
-                    }
-                    Button("Cancel") { model.cancelExport() }.buttonStyle(RecorderButtonStyle())
-                }.frame(height: 44)
+                ExportProgressRow(model: model, live: model.live).frame(height: 44)
             } else {
                 Button {
                     model.export()
@@ -323,8 +291,9 @@ struct MainView: View {
         }.font(.system(size: 12))
     }
 
-    private func rangeField(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View
-    {
+    private func rangeField(
+        _ label: String, value: Binding<Double>, range: ClosedRange<Double>
+    ) -> some View {
         HStack(spacing: 6) {
             Text(label)
             TextField(
@@ -340,12 +309,67 @@ struct MainView: View {
             Text("s").foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity)
     }
+}
 
-    private var recordingControls: some View {
+/// A time readout in `mm:ss`.
+private func elapsedClock(_ time: Double) -> String {
+    let value = max(0, Int(time.isFinite ? time : 0))
+    return String(format: "%02d:%02d", value / 60, value % 60)
+}
+
+/// The transport row under the preview.
+///
+/// It owns the playback clock, which AVPlayer reports ten times a second. Observing `live` here
+/// instead of reading the model keeps those ticks inside this row.
+private struct PlaybackBar: View {
+    @ObservedObject var model: RecorderModel
+    @ObservedObject var live: RecorderLiveState
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button {
+                model.togglePlayback()
+            } label: {
+                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+            }.buttonStyle(RecorderButtonStyle()).accessibilityLabel(
+                model.isPlaying ? "Pause preview" : "Play preview"
+            )
+
+            .disabled(model.busy || model.duration <= 0)
+            Text(elapsedClock(live.playbackTime)).monospacedDigit().frame(width: 42)
+                .accessibilityLabel("Playback position")
+            Slider(
+                value: Binding(
+                    get: { min(live.playbackTime, max(model.duration, 0.1)) },
+                    set: { model.seekPlayback(to: $0) }),
+                in: 0...max(model.duration, 0.1)
+            ).accessibilityLabel("Playback scrubber")
+                .disabled(model.busy || model.duration <= 0)
+            Text(elapsedClock(model.duration)).monospacedDigit().frame(width: 42)
+            Menu {
+                Picker("Preview size", selection: $model.previewSizing) {
+                    Text("Original size").tag(VideoPreviewSizing.actualSize)
+                    Text("Fit window").tag(VideoPreviewSizing.fitWindow)
+                }
+            } label: {
+                Text(model.previewSizing == .actualSize ? "Original size" : "Fit window")
+            }.menuStyle(.borderlessButton).fixedSize()
+                .help("Original size avoids enlarging small recordings. This changes preview only.")
+                .accessibilityLabel("Preview size")
+        }.font(.system(size: 11)).padding(8).background(.white)
+    }
+}
+
+/// The status line shown while a take is running.
+private struct RecordingControlsBar: View {
+    @ObservedObject var model: RecorderModel
+    @ObservedObject var live: RecorderLiveState
+
+    var body: some View {
         HStack(spacing: 8) {
             Circle().fill(model.phase == .paused ? .orange : .red).frame(width: 8, height: 8)
             Text(model.phase.statusText).font(.system(size: 12))
-            Text(model.formattedElapsed).monospacedDigit()
+            Text(live.formattedElapsed).monospacedDigit()
             Spacer(minLength: 0)
             Button(model.phase == .paused ? "Resume" : "Pause") { model.togglePause() }.buttonStyle(
                 RecorderButtonStyle()
@@ -353,11 +377,28 @@ struct MainView: View {
             Button("Record Again") { model.restartRecording() }.buttonStyle(RecorderButtonStyle())
                 .help("Save this take, then start a new one")
             Button("Stop") { model.stopRecording() }.buttonStyle(RecorderButtonStyle(tone: .destructive))
+
         }.disabled(!model.canControlRecording)
     }
+}
 
-    private func clock(_ time: Double) -> String {
-        let value = max(0, Int(time.isFinite ? time : 0))
-        return String(format: "%02d:%02d", value / 60, value % 60)
+/// The progress line shown while an export runs.
+private struct ExportProgressRow: View {
+    @ObservedObject var model: RecorderModel
+    @ObservedObject var live: RecorderLiveState
+
+    var body: some View {
+        HStack {
+            if model.exportFormat == .gif {
+                ProgressView(value: live.exportProgress)
+                Text("\(Int(live.exportProgress * 100))%").monospacedDigit()
+            } else {
+                ProgressView().controlSize(.small)
+                Text("Saving video…")
+                Spacer()
+            }
+            Button("Cancel") { model.cancelExport() }.buttonStyle(RecorderButtonStyle())
+
+        }
     }
 }

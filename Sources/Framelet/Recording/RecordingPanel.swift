@@ -95,7 +95,7 @@ final class RecordingPanel {
         if hostingView == nil {
             let view = NSHostingView(
                 rootView: RecordingHUD(
-                    model: model, presentation: presentation,
+                    model: model, live: model.live, presentation: presentation,
                     areaProvider: { [weak self] in self?.regionRect },
                     moveArea: { [weak self] in self?.moveArea(to: $0) ?? false }))
             view.autoresizingMask = [.width, .height]
@@ -250,6 +250,7 @@ private final class RecordingPanelPresentation: ObservableObject {
 
 private struct RecordingHUD: View {
     @ObservedObject var model: RecorderModel
+    @ObservedObject var live: RecorderLiveState
     @ObservedObject var presentation: RecordingPanelPresentation
     private var layout: RecordingPanelLayout { presentation.layout }
     var areaProvider: () -> CGRect?
@@ -309,6 +310,7 @@ private struct RecordingHUD: View {
                                 + RecorderShortcuts.pauseLabel
                         )
                         .accessibilityLabel(model.phase == .paused ? "Resume recording" : "Pause recording")
+
                     Button {
                         model.restartRecording()
                     } label: {
@@ -459,10 +461,10 @@ private struct RecordingHUD: View {
         switch model.phase {
         case .countdown(let value): return "Recording in \(value)"
         case .starting: return "Starting…"
-        case .paused: return "Paused  \(model.formattedElapsed)"
+        case .paused: return "Paused  \(live.formattedElapsed)"
         case .stopping: return "Saving…"
         case .restarting: return "Saving, then restarting…"
-        default: return model.formattedElapsed
+        default: return live.formattedElapsed
         }
     }
 }
