@@ -38,7 +38,7 @@ struct MainView: View {
                     Spacer()
                     if model.lastExport != nil {
                         Button("Show File") { model.revealExport() }.buttonStyle(RecorderButtonStyle())
-
+                            .controlID(ControlID.showFile)
                     }
                 }.frame(height: 32)
             }.padding(22).background(paper)
@@ -86,7 +86,7 @@ struct MainView: View {
             } label: {
                 Label("New Recording", systemImage: "plus").frame(maxWidth: .infinity)
             }.buttonStyle(RecorderButtonStyle(tone: .primary)).disabled(model.busy)
-                .keyboardShortcut("n", modifiers: .command)
+                .keyboardShortcut("n", modifiers: .command).controlID(ControlID.newRecording)
             ScrollView {
                 LazyVStack(spacing: 4) {
                     if model.clips.isEmpty {
@@ -119,7 +119,7 @@ struct MainView: View {
             } label: {
                 Label("Recordings Folder", systemImage: "folder")
                     .lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
-            }.buttonStyle(RecorderButtonStyle())
+            }.buttonStyle(RecorderButtonStyle()).controlID(ControlID.openLibrary)
             VStack(alignment: .leading, spacing: 7) {
                 shortcut("Start / stop", RecorderShortcuts.captureLabel)
                 shortcut("Pause / resume", RecorderShortcuts.pauseLabel)
@@ -145,7 +145,7 @@ struct MainView: View {
             } label: {
                 Text("Choose Recording Area").frame(width: 180)
             }.buttonStyle(RecorderButtonStyle(tone: .primary)).disabled(model.busy)
-
+                .controlID(ControlID.chooseArea)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
     }
@@ -235,22 +235,22 @@ struct MainView: View {
                     Text("MP4 video").tag(ClipExportFormat.video)
                     Text("Animated GIF").tag(ClipExportFormat.gif)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 230).accessibilityLabel("Export format")
-
+                    .controlID(ControlID.exportFormat)
                 Spacer(minLength: 0)
                 Button("Reset range") { model.resetExportRange() }
-                    .buttonStyle(RecorderButtonStyle(height: 32))
+                    .buttonStyle(RecorderButtonStyle(height: 32)).controlID(ControlID.resetRange)
             }.disabled(model.busy)
             HStack(spacing: 10) {
                 rangeField(
                     "Start",
                     value: Binding(
                         get: { model.exportStart }, set: { model.setExportStart($0) }
-                    ), range: 0...max(0, model.duration - 0.1))
+                    ), range: 0...max(0, model.duration - 0.1), id: ControlID.exportStart)
                 rangeField(
                     "Duration",
                     value: Binding(
                         get: { model.exportDuration }, set: { model.setExportDuration($0) }
-                    ), range: 0.1...max(0.1, model.maxExportDuration))
+                    ), range: 0.1...max(0.1, model.maxExportDuration), id: ControlID.exportDuration)
                 Text(model.exportFormat == .gif ? "GIF: up to 60 s" : "Original stays unchanged")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }.disabled(model.busy || model.duration < 0.1)
@@ -286,13 +286,13 @@ struct MainView: View {
                     )
                     .frame(maxWidth: .infinity)
                 }.buttonStyle(RecorderButtonStyle(tone: .primary))
-                    .disabled(model.busy || model.duration < 0.1)
+                    .disabled(model.busy || model.duration < 0.1).controlID(ControlID.exportButton)
             }
         }.font(.system(size: 12))
     }
 
     private func rangeField(
-        _ label: String, value: Binding<Double>, range: ClosedRange<Double>
+        _ label: String, value: Binding<Double>, range: ClosedRange<Double>, id: String
     ) -> some View {
         HStack(spacing: 6) {
             Text(label)
@@ -305,7 +305,7 @@ struct MainView: View {
                             $0.isFinite ? min(max($0, range.lowerBound), range.upperBound) : range.lowerBound
                     }), format: .number.precision(.fractionLength(1))
             )
-            .textFieldStyle(.roundedBorder).frame(width: 62).controlSize(.large)
+            .textFieldStyle(.roundedBorder).frame(width: 62).controlSize(.large).controlID(id)
             Text("s").foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity)
     }
@@ -334,7 +334,7 @@ private struct PlaybackBar: View {
             }.buttonStyle(RecorderButtonStyle()).accessibilityLabel(
                 model.isPlaying ? "Pause preview" : "Play preview"
             )
-
+            .controlID(ControlID.playToggle)
             .disabled(model.busy || model.duration <= 0)
             Text(elapsedClock(live.playbackTime)).monospacedDigit().frame(width: 42)
                 .accessibilityLabel("Playback position")
@@ -343,7 +343,7 @@ private struct PlaybackBar: View {
                     get: { min(live.playbackTime, max(model.duration, 0.1)) },
                     set: { model.seekPlayback(to: $0) }),
                 in: 0...max(model.duration, 0.1)
-            ).accessibilityLabel("Playback scrubber")
+            ).accessibilityLabel("Playback scrubber").controlID(ControlID.playbackSlider)
                 .disabled(model.busy || model.duration <= 0)
             Text(elapsedClock(model.duration)).monospacedDigit().frame(width: 42)
             Menu {
@@ -369,15 +369,15 @@ private struct RecordingControlsBar: View {
         HStack(spacing: 8) {
             Circle().fill(model.phase == .paused ? .orange : .red).frame(width: 8, height: 8)
             Text(model.phase.statusText).font(.system(size: 12))
-            Text(live.formattedElapsed).monospacedDigit()
+            Text(live.formattedElapsed).monospacedDigit().controlID(ControlID.elapsed)
             Spacer(minLength: 0)
             Button(model.phase == .paused ? "Resume" : "Pause") { model.togglePause() }.buttonStyle(
                 RecorderButtonStyle()
-            ).disabled(model.pauseIsChanging)
+            ).disabled(model.pauseIsChanging).controlID(ControlID.pauseRecording)
             Button("Record Again") { model.restartRecording() }.buttonStyle(RecorderButtonStyle())
-                .help("Save this take, then start a new one")
+                .help("Save this take, then start a new one").controlID(ControlID.recordAgain)
             Button("Stop") { model.stopRecording() }.buttonStyle(RecorderButtonStyle(tone: .destructive))
-
+                .controlID(ControlID.stopRecording)
         }.disabled(!model.canControlRecording)
     }
 }
@@ -390,7 +390,7 @@ private struct ExportProgressRow: View {
     var body: some View {
         HStack {
             if model.exportFormat == .gif {
-                ProgressView(value: live.exportProgress)
+                ProgressView(value: live.exportProgress).controlID(ControlID.exportProgress)
                 Text("\(Int(live.exportProgress * 100))%").monospacedDigit()
             } else {
                 ProgressView().controlSize(.small)
@@ -398,7 +398,7 @@ private struct ExportProgressRow: View {
                 Spacer()
             }
             Button("Cancel") { model.cancelExport() }.buttonStyle(RecorderButtonStyle())
-
+                .controlID(ControlID.cancelExport)
         }
     }
 }

@@ -278,7 +278,7 @@ private struct RecordingHUD: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.system(size: 14, weight: .semibold, design: .monospaced))
-                    .lineLimit(1).minimumScaleFactor(0.75)
+                    .lineLimit(1).minimumScaleFactor(0.75).controlID(ControlID.hudTime)
                 if !layout.compact {
                     Text(subtitle).lineLimit(1).truncationMode(.middle)
                         .font(.system(size: 10)).foregroundStyle(.white.opacity(0.55))
@@ -310,7 +310,7 @@ private struct RecordingHUD: View {
                                 + RecorderShortcuts.pauseLabel
                         )
                         .accessibilityLabel(model.phase == .paused ? "Resume recording" : "Pause recording")
-
+                        .controlID(ControlID.hudPause)
                     Button {
                         model.restartRecording()
                     } label: {
@@ -323,7 +323,7 @@ private struct RecordingHUD: View {
                 } label: {
                     Image(systemName: "stop.fill")
                 }.buttonStyle(RecorderButtonStyle(tone: .dark, height: 36))
-                    .accessibilityLabel("Stop recording")
+                    .accessibilityLabel("Stop recording").controlID(ControlID.hudStop)
             } else if model.isCountingDown {
                 Button {
                     model.cancelSelection()
