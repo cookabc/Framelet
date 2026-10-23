@@ -143,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             accessibilityDescription: "Framelet")
         statusItem?.button?.contentTintColor =
             model.phase == .paused ? .systemOrange : recording ? .systemRed : nil
-        statusItem?.button?.toolTip = "Framelet · \(RecorderShortcuts.captureLabel) start / stop"
+        statusItem?.button?.toolTip = "Framelet — \(RecorderShortcuts.captureLabel) to start / stop"
     }
 
     func menuWillOpen(_ menu: NSMenu) {

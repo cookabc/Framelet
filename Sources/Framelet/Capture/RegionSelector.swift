@@ -50,7 +50,7 @@ final class RegionSelector {
             return WindowCandidate(
                 id: id, ownerPID: pid,
                 frame: WindowSelection.appKitRect(fromQuartz: quartz, primaryTop: primaryTop),
-                title: owner + " · Menu", isMenu: true)
+                title: owner + " — Menu", isMenu: true)
         }
         let commands = keyboard.start { [weak self] command in
             if command == .cancel { self?.cancel() } else { self?.confirmHovered() }
@@ -74,7 +74,7 @@ final class RegionSelector {
             let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
             view.screenOrigin = screen.frame.origin
             view.candidates = candidates
-            view.keyboardHint = hints.joined(separator: " · ")
+            view.keyboardHint = hints.joined(separator: ", ")
             view.onKeyboardConfirm = { [weak self] in self?.confirmHovered() }
             view.onCancel = { [weak self] in self?.cancel() }
             view.onSelect = { [weak self] rect in

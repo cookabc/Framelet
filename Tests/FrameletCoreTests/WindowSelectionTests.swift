@@ -7,7 +7,7 @@ final class WindowSelectionTests: XCTestCase {
         XCTAssertEqual(WindowSelection.displayTitle(application: "ZCode", window: "ZCode"), "ZCode")
         XCTAssertEqual(WindowSelection.displayTitle(application: "ZCode", window: " zcode "), "zcode")
         XCTAssertEqual(
-            WindowSelection.displayTitle(application: "TextEdit", window: "Notes"), "TextEdit · Notes")
+            WindowSelection.displayTitle(application: "TextEdit", window: "Notes"), "TextEdit — Notes")
         XCTAssertEqual(WindowSelection.displayTitle(application: "Safari", window: nil), "Safari")
         XCTAssertEqual(WindowSelection.displayTitle(application: "Safari", window: "   "), "Safari")
     }
@@ -47,7 +47,7 @@ final class WindowSelectionTests: XCTestCase {
 
     func testMenuCandidateIsDistinguishedFromAnOrdinaryWindow() {
         let menu = WindowCandidate(
-            id: 7, ownerPID: 9, frame: CGRect(x: 100, y: 100, width: 80, height: 200), title: "App · Menu",
+            id: 7, ownerPID: 9, frame: CGRect(x: 100, y: 100, width: 80, height: 200), title: "App — Menu",
             isMenu: true)
         let window = WindowCandidate(
             id: 1, ownerPID: 10, frame: CGRect(x: 0, y: 0, width: 800, height: 600), title: "Window")

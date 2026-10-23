@@ -27,7 +27,7 @@ public enum WindowSelection {
         if title.compare(app, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
             return title
         }
-        return app.isEmpty ? title : app + " · " + title
+        return app.isEmpty ? title : app + " — " + title
     }
 
     /// Owners whose menu-level windows are system chrome, not content a user would record.

@@ -27,7 +27,7 @@ final class SelectionView: NSView {
     var onCancel: (() -> Void)?
     var screenOrigin: CGPoint = .zero
     var candidates: [WindowCandidate] = []
-    var keyboardHint = "Return to confirm · ⎋ to cancel"
+    var keyboardHint = "Return to confirm, ⎋ to cancel"
     var onKeyboardConfirm: (() -> Void)?
     private var hovered: WindowCandidate?
     private var anchor: CGPoint?
@@ -154,14 +154,14 @@ final class SelectionView: NSView {
                 hovered.map {
                     String($0.title.prefix(65))
                         + ($0.isMenu
-                            ? "  ·  Press \(RecorderShortcuts.captureLabel) to record this area"
-                            : "  ·  Click to record this window")
+                            ? ". Press \(RecorderShortcuts.captureLabel) to record this area"
+                            : ". Click to record this window")
                 }
                 ?? "\(Int(selection.width)) × \(Int(selection.height))"
             drawLabel(size, at: CGPoint(x: selection.midX, y: max(20, selection.minY - 34)), fontSize: 12)
         }
         drawLabel(
-            "Click a window · Drag an area · \(keyboardHint)",
+            "Click a window or drag an area. \(keyboardHint)",
             at: CGPoint(x: bounds.midX, y: bounds.height - 96), fontSize: 15)
     }
 

@@ -159,7 +159,7 @@ struct MainView: View {
             PlaybackBar(model: model, live: model.live)
             if !model.resolution.isEmpty {
                 Text(
-                    model.resolution + " px · "
+                    model.resolution + " px, "
                         + (model.previewSizing == .actualSize
                             ? "Original size; shrinks only when needed"
                             : "Fit preview; small videos may look softer")
@@ -216,7 +216,7 @@ struct MainView: View {
                     .help(
                         "Show ScreenCaptureKit's native click feedback in the video. No keyboard monitoring.")
                 Spacer()
-                Text("Silent recording · annotations on area takes")
+                Text("Silent recording. Annotations on area takes.")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }.font(.system(size: 12))
         }.frame(height: 66).disabled(model.busy)

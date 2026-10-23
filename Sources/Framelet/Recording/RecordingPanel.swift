@@ -448,9 +448,9 @@ private struct RecordingHUD: View {
     }
 
     private var subtitle: String {
-        if model.isMovingRegion { return "Drag area · right-click cancels" }
-        if model.isWindowRecording { return "Follows window · drag-select an area to annotate" }
-        if model.isAnnotating { return "Draw area · pencil exits" }
+        if model.isMovingRegion { return "Drag area, right-click cancels" }
+        if model.isWindowRecording { return "Follows window; drag-select an area to annotate" }
+        if model.isAnnotating { return "Draw area, pencil exits" }
         if case .countdown = model.phase { return "Arrange what you want to capture" }
         return model.recordingTitle
     }
