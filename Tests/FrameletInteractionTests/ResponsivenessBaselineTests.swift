@@ -159,6 +159,28 @@ final class ResponsivenessBaselineTests: XCTestCase {
         return (root.value, live.value)
     }
 
+    /// Counts live writes and records the whole-second value each one left behind.
+    ///
+    /// Wall-clock elapsed time is useless on a loaded CI runner: `spin(3.0)` has
+    /// taken over ten seconds when the CPU is throttled, so a "writes per second"
+    /// rate computed from the requested window is fiction. What the gate actually
+    /// promises is "one write per distinct second", which is measured directly.
+    private func countingLiveWrites(
+        _ model: RecorderModel, _ body: () async throws -> Void
+    ) async throws -> (root: Int, seconds: [Int]) {
+        let root = PublishCounter()
+        let seconds = LockedInts()
+        let subscriptions = [
+            model.objectWillChange.sink { _ in root.value += 1 },
+            model.live.objectWillChange.sink { _ in seconds.append(Int(model.live.elapsed)) },
+        ]
+        defer {
+            for subscription in subscriptions { subscription.cancel() }
+        }
+        try await body()
+        return (root.value, seconds.values)
+    }
+
     // MARK: - 功能门禁
 
     /// 界面确实画出了东西：优化不许把窗口画成空白。
@@ -320,8 +342,9 @@ final class ResponsivenessBaselineTests: XCTestCase {
     /// 只数稳定录制的一段：begin/stop 的状态切换本来就该重算一次整窗，把它们算进来就量不出
     /// "计时器是否在驱动整窗"。计时器仍 5Hz，但读数只显示整秒，所以每秒只该有一次 live 写入。
     ///
-    /// 采样 3 秒再折成每秒速率。1 秒窗口只要边界上多跨一次整秒翻转就会从 1 跳到 2（CI 上见过 4），
-    /// 那是窗口太短而不是产品退化；3 秒把边界效应摊薄，门禁判的是速率不是运气。
+    /// 判据是"每个整秒最多写一次"。不数总次数：CI 被限流时 `spin(3.0)` 实测跑了 10 秒，
+    /// 合法地跨过 11 个秒边界，按次数判就是在测 runner 的负载而不是代码。
+    /// 重复的整秒值才是真正的退化（改前的 10Hz 时钟每秒写四次），它和 runner 快慢无关。
     func testRecordingTickerPublishes() async throws {
         let library = try tempDirectory("ticker")
         let capture = IdleCapture()
@@ -336,18 +359,20 @@ final class ResponsivenessBaselineTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertEqual(model.phase, .recording, "假引擎没让录制进入 recording")
-        let window = 3.0
-        let counts = try await countingPublishes(model) { try await spin(window) }
+        // 开录时模型会把 elapsed 归零一次，与 ticker 在同一秒内各写一次；那是对齐起点，
+        // 不是节流失效。先让第一秒过去再开始计数。
+        try await spin(1.2)
+        let counts = try await countingLiveWrites(model) { try await spin(3.0) }
         model.stopRecording()
-        print("RECORDING_ROOT_PUBLISHES \(counts.root) LIVE_PUBLISHES \(counts.live) OVER \(window)s")
-        XCTAssertGreaterThan(counts.live, 0, "计时器没跑，这个基线量不到东西")
-        // One write per distinct whole second is the contract, and an N-second window can touch
-        // N+1 second boundaries depending on where it starts. Anything above that means the
-        // ticker is writing sub-second values again — which is exactly what the old 10 Hz clock
-        // did and what this gate exists to catch.
-        let maxWrites = Int(window) + 1
-        XCTAssertLessThanOrEqual(
-            counts.live, maxWrites, "计时读数在 \(window)s 内重绘 \(counts.live) 次，超过 \(maxWrites)，整秒门禁失效")
+        print("RECORDING_ROOT_PUBLISHES \(counts.root) LIVE_SECONDS \(counts.seconds)")
+        XCTAssertFalse(counts.seconds.isEmpty, "计时器没跑，这个基线量不到东西")
+        // The contract is one write per distinct whole second. Asserting on the number of writes
+        // instead would be measuring the runner: on a throttled box `spin(3.0)` has taken 10s,
+        // legitimately touching 11 second boundaries. Duplicate seconds are the actual regression
+        // (the old 10 Hz clock wrote four times per second), and that is runner-independent.
+        XCTAssertEqual(
+            counts.seconds.count, Set(counts.seconds).count,
+            "同一整秒被写了多次：\(counts.seconds)")
         XCTAssertEqual(counts.root, 0, "稳定录制期间仍在驱动整窗重绘")
     }
 
@@ -431,4 +456,19 @@ final class ResponsivenessBaselineTests: XCTestCase {
 
 private final class PublishCounter: @unchecked Sendable {
     var value = 0
+}
+
+private final class LockedInts: @unchecked Sendable {
+    private var storage: [Int] = []
+    private let lock = NSLock()
+    func append(_ value: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage.append(value)
+    }
+    var values: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
 }
