@@ -339,12 +339,15 @@ final class ResponsivenessBaselineTests: XCTestCase {
         let window = 3.0
         let counts = try await countingPublishes(model) { try await spin(window) }
         model.stopRecording()
-        let livePerSecond = Double(counts.live) / window
         print("RECORDING_ROOT_PUBLISHES \(counts.root) LIVE_PUBLISHES \(counts.live) OVER \(window)s")
         XCTAssertGreaterThan(counts.live, 0, "计时器没跑，这个基线量不到东西")
-        let liveThreshold = ProcessInfo.processInfo.environment["CI"] != nil ? 1.5 : 1.2
+        // One write per distinct whole second is the contract, and an N-second window can touch
+        // N+1 second boundaries depending on where it starts. Anything above that means the
+        // ticker is writing sub-second values again — which is exactly what the old 10 Hz clock
+        // did and what this gate exists to catch.
+        let maxWrites = Int(window) + 1
         XCTAssertLessThanOrEqual(
-            livePerSecond, liveThreshold, "计时读数每秒重绘 \(livePerSecond) 次，超过 \(liveThreshold)，整秒门禁失效")
+            counts.live, maxWrites, "计时读数在 \(window)s 内重绘 \(counts.live) 次，超过 \(maxWrites)，整秒门禁失效")
         XCTAssertEqual(counts.root, 0, "稳定录制期间仍在驱动整窗重绘")
     }
 

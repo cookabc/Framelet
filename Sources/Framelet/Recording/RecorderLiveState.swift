@@ -19,10 +19,21 @@ final class RecorderLiveState: ObservableObject {
 
     /// The ticker runs at 5 Hz but both readouts show whole seconds, so the other four writes
     /// repaint pixels that cannot have changed.
+    ///
+    /// The guard compares whole seconds, and it also records the second it accepted. A stalled
+    /// run loop lets several queued ticks run back to back, each reading a newer `elapsed`; when
+    /// the clock jumps 0 → 1 → 2 → 3 faster than the readouts can be consumed, comparing against
+    /// the *last published* value lets every one of them through. `lastPublishedSecond` makes the
+    /// rule literal: one write per distinct second, no matter how the ticks bunch up.
+    private var lastPublishedSecond: Int?
+
     func tickElapsed(_ value: Double) {
-        let published = Int(value) != Int(elapsed)
+        let second = Int(value)
+        let published = second != lastPublishedSecond
         PerfSignpost.liveWrite("elapsed", published: published) {
-            if published { elapsed = value }
+            guard published else { return }
+            lastPublishedSecond = second
+            elapsed = value
         }
     }
 
