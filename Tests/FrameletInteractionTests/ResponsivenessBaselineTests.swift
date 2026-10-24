@@ -317,8 +317,11 @@ final class ResponsivenessBaselineTests: XCTestCase {
 
     /// 录制期间：整窗重绘次数（root）与计时读数行重绘次数（live）。
     ///
-    /// 只数稳定录制的那 1 秒：begin/stop 的状态切换本来就该重算一次整窗，把它们算进来就量不出
-    /// "计时器是否在驱动整窗"。计时器仍 5Hz，但读数只显示整秒，所以一秒里只该有一次 live 写入。
+    /// 只数稳定录制的一段：begin/stop 的状态切换本来就该重算一次整窗，把它们算进来就量不出
+    /// "计时器是否在驱动整窗"。计时器仍 5Hz，但读数只显示整秒，所以每秒只该有一次 live 写入。
+    ///
+    /// 采样 3 秒再折成每秒速率。1 秒窗口只要边界上多跨一次整秒翻转就会从 1 跳到 2（CI 上见过 4），
+    /// 那是窗口太短而不是产品退化；3 秒把边界效应摊薄，门禁判的是速率不是运气。
     func testRecordingTickerPublishes() async throws {
         let library = try tempDirectory("ticker")
         let capture = IdleCapture()
@@ -333,12 +336,15 @@ final class ResponsivenessBaselineTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertEqual(model.phase, .recording, "假引擎没让录制进入 recording")
-        let counts = try await countingPublishes(model) { try await spin(1.0) }
+        let window = 3.0
+        let counts = try await countingPublishes(model) { try await spin(window) }
         model.stopRecording()
-        print("RECORDING_ROOT_PUBLISHES_1S \(counts.root) LIVE_PUBLISHES_1S \(counts.live)")
+        let livePerSecond = Double(counts.live) / window
+        print("RECORDING_ROOT_PUBLISHES \(counts.root) LIVE_PUBLISHES \(counts.live) OVER \(window)s")
         XCTAssertGreaterThan(counts.live, 0, "计时器没跑，这个基线量不到东西")
-        let liveThreshold = ProcessInfo.processInfo.environment["CI"] != nil ? 3 : 2
-        XCTAssertLessThanOrEqual(counts.live, liveThreshold, "计时读数每秒重绘超过 \(liveThreshold) 次，整秒门禁失效")
+        let liveThreshold = ProcessInfo.processInfo.environment["CI"] != nil ? 1.5 : 1.2
+        XCTAssertLessThanOrEqual(
+            livePerSecond, liveThreshold, "计时读数每秒重绘 \(livePerSecond) 次，超过 \(liveThreshold)，整秒门禁失效")
         XCTAssertEqual(counts.root, 0, "稳定录制期间仍在驱动整窗重绘")
     }
 
