@@ -1,3 +1,5 @@
+**English** · [简体中文](README.zh-CN.md)
+
 # Framelet
 
 A native macOS window and area screen recorder. Pick a window or drag out an area, then record —
